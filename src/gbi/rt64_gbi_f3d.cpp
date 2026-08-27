@@ -5,6 +5,7 @@
 #include "rt64_gbi_f3d.h"
 
 #include <cassert>
+#include <cstdio>
 
 #include "../include/rt64_extended_gbi.h"
 
@@ -63,9 +64,22 @@ namespace RT64 {
             case F3D_G_MV_LOOKATY:
                 state->rsp->setLookAt(1, (*dl)->w1);
                 break;
-            default:
+            default: {
+                const uint32_t commandAddress = uint32_t(reinterpret_cast<uint8_t *>(*dl) - state->RDRAM);
+                std::fprintf(stderr,
+                    "RT64 F3D MoveMem: index=0x%02X w0=0x%08X w1=0x%08X command=0x%08X taskStart=0x%08X stack=%zu\n",
+                    (*dl)->p0(16, 8), (*dl)->w0, (*dl)->w1, commandAddress,
+                    state->displayListAddress, state->returnAddressStack.size());
+                for (size_t stackIndex = 0; stackIndex < state->returnAddressStack.size(); stackIndex++) {
+                    DisplayList *caller = state->returnAddressStack[stackIndex];
+                    const uint32_t callerAddress = uint32_t(reinterpret_cast<uint8_t *>(caller) - state->RDRAM);
+                    std::fprintf(stderr, "RT64 F3D MoveMem stack[%zu]: address=0x%08X w0=0x%08X w1=0x%08X\n",
+                        stackIndex, callerAddress, caller->w0, caller->w1);
+                }
+                std::fflush(stderr);
                 assert(false && "Unimplemented move mem.");
                 break;
+            }
             }
         }
         
@@ -74,6 +88,17 @@ namespace RT64 {
         }
 
         void runDl(State *state, DisplayList **dl) {
+            // A zero target is not a usable display list. Doraemon can recycle
+            // sprite display-list memory immediately after the early SP event,
+            // leaving a partially rewritten G_DL (the command word is present
+            // while its address is still zero). Following it would make the
+            // interpreter execute RDRAM address 0 as graphics commands.
+            // Recover as if the malformed nested list had ended.
+            if ((*dl)->w1 == 0) {
+                *dl = state->popReturnAddress();
+                return;
+            }
+
             if ((*dl)->p0(16, 1) == 0) {
                 state->pushReturnAddress(*dl);
             }

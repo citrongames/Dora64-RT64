@@ -148,6 +148,7 @@ namespace RT64 {
         void fullSyncFramebufferPairTiles(Workload &workload, FramebufferPair &fbPair, uint32_t &loadOpCursor, uint32_t &rdpTileCursor);
         void listProcessBegin();
         void listProcessEnd();
+        void updateScreenIfFramebufferChanged(const VI &newVI);
         void updateScreen(const VI &newVI, bool fromEarlyPresent);
         void updateMultisampling();
         void inspect();

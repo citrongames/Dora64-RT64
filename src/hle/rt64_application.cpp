@@ -73,6 +73,7 @@ namespace RT64 {
         frameCounter = 0;
         threadsAvailable = std::max(std::thread::hardware_concurrency(), 1U);
         freeCamClearQueued = false;
+        developerInspectorVisible = false;
 
         if (appConfig.detectDataPath) {
             this->appConfig.dataPath = userPaths.detectDataPath(appConfig.appId);
@@ -424,6 +425,15 @@ namespace RT64 {
         presentExt.createdGraphicsAPI = chosenGraphicsAPI;
         presentQueue->setup(presentExt);
 
+        // The application overlay shares RT64's GUI renderer, but remains
+        // independent from the optional developer inspector.
+        if (appConfig.drawOverlay != nullptr) {
+            presentQueue->inspector = std::make_unique<Inspector>(device.get(), swapChain.get(), chosenGraphicsAPI, appWindow->sdlWindow);
+            if (!userPaths.isEmpty()) {
+                presentQueue->inspector->setIniPath(userPaths.imguiPath);
+            }
+        }
+
         // Configure the state to use all the created components.
         State::External stateExt;
         stateExt.app = this;
@@ -513,6 +523,11 @@ namespace RT64 {
         appWindow->sdlCheckFilterInstallation();
         screenApiProfiler.logAndRestart();
         state->updateScreen(core.decodeVI(), false);
+    }
+
+    void Application::updateScreenIfFramebufferChanged() {
+        appWindow->sdlCheckFilterInstallation();
+        state->updateScreenIfFramebufferChanged(core.decodeVI());
     }
 
     void Application::destroyShaderCache() {
@@ -619,7 +634,7 @@ namespace RT64 {
     }
 
     bool Application::usesWindowMessageFilter() {
-        return userConfig.developerMode;
+        return userConfig.developerMode || (appConfig.drawOverlay != nullptr);
     }
 
     void Application::processDeveloperShortcut(DeveloperShortcut developerShortcut) {
@@ -627,7 +642,8 @@ namespace RT64 {
         case DeveloperShortcut::Inspector: {
             if (userConfig.developerMode) {
                 const std::lock_guard lock(presentQueue->inspectorMutex);
-                if (presentQueue->inspector == nullptr) {
+                developerInspectorVisible = !developerInspectorVisible;
+                if (developerInspectorVisible && (presentQueue->inspector == nullptr)) {
                     presentQueue->inspector = std::make_unique<Inspector>(device.get(), swapChain.get(), chosenGraphicsAPI, appWindow->sdlWindow);
                     if (!userPaths.isEmpty()) {
                         presentQueue->inspector->setIniPath(userPaths.imguiPath);
@@ -635,8 +651,11 @@ namespace RT64 {
 
                     freeCamClearQueued = true;
                 }
-                else if (presentQueue->inspector != nullptr) {
+                else if (!developerInspectorVisible && (appConfig.drawOverlay == nullptr)) {
                     presentQueue->inspector.reset(nullptr);
+                }
+                else if (developerInspectorVisible) {
+                    freeCamClearQueued = true;
                 }
             }
             else {

@@ -620,7 +620,7 @@ namespace RT64 {
         if (!rdramCheckPending) {
             return;
         }
-        
+
         assert(drawFbOperations.empty() && "There should be no pending framebuffer operations when this is started.");
         assert(drawFbDiscards.empty() && "There should be no pending framebuffer discards when this is started.");
 
@@ -1631,7 +1631,7 @@ namespace RT64 {
 
         // Inspect the current workload before submission.
         lastWorkloadIndex = ext.workloadQueue->writeCursor;
-        if (ext.userConfig->developerMode) {
+        if (ext.userConfig->developerMode || (ext.app->appConfig.drawOverlay != nullptr)) {
             inspect();
         }
 
@@ -1835,10 +1835,38 @@ namespace RT64 {
         clearExtended();
     }
     
+    void State::updateScreenIfFramebufferChanged(const VI &newVI) {
+        if (!newVI.visible()) {
+            return;
+        }
+
+        Framebuffer *screenFb = framebufferManager.find(newVI.fbAddress());
+        if (screenFb == nullptr) {
+            return;
+        }
+
+        const hlslpp::uint2 screenFbSize = newVI.fbSize();
+        if ((screenFbSize.x != screenFb->width) || (newVI.fbSiz() != screenFb->siz)) {
+            return;
+        }
+
+        if (screenFb->siz < G_IM_SIZ_16b) {
+            return;
+        }
+
+        const uint8_t *fbRAM = &RDRAM[screenFb->addressStart];
+        const uint64_t currentHash = XXH3_64bits(fbRAM, screenFb->RAMBytes);
+        if (currentHash == screenFb->RAMHash) {
+            return;
+        }
+
+        updateScreen(newVI, false);
+    }
+
     void State::updateScreen(const VI &newVI, bool fromEarlyPresent) {
         // If the debugger has paused the plugin, keep submitting the last workload and screen VI for rendering and a present event.
         if (debuggerInspector.paused && !fromEarlyPresent) {
-            if (ext.userConfig->developerMode) {
+            if (ext.userConfig->developerMode || (ext.app->appConfig.drawOverlay != nullptr)) {
                 inspect();
             }
             
@@ -1983,6 +2011,19 @@ namespace RT64 {
             return;
         }
 
+        inspector->newFrame(ext.framebufferGraphicsWorker);
+        if (ext.app->appConfig.drawOverlay != nullptr) {
+            ext.app->appConfig.drawOverlay();
+        }
+
+        // The overlay is always rendered. The much larger RT64 inspector UI is
+        // generated only while the developer explicitly has it open.
+        if (!ext.app->developerInspectorVisible) {
+            inspector->endFrame();
+            ext.presentQueue->inspectorMutex.unlock();
+            return;
+        }
+
         enum class InspectorMode {
             None,
             Light,
@@ -2002,7 +2043,6 @@ namespace RT64 {
         const uint32_t previousMSAACount = userConfig.msaaSampleCount();
         Workload &workload = ext.workloadQueue->workloads[lastWorkloadIndex];
         InspectorMode inspectorMode = InspectorMode::None;
-        inspector->newFrame(ext.framebufferGraphicsWorker);
 
         if (ext.app->freeCamClearQueued) {
             debuggerInspector.camera.enabled = false;

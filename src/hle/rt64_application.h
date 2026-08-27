@@ -40,6 +40,7 @@ namespace RT64 {
         std::filesystem::path dataPath;
         bool detectDataPath = true;
         bool useConfigurationFile = true;
+        void (*drawOverlay)() = nullptr;
     };
 
     struct Application : public ApplicationWindow::Listener {
@@ -109,6 +110,7 @@ namespace RT64 {
         ApplicationConfiguration appConfig;
         UserConfiguration::GraphicsAPI chosenGraphicsAPI;
         bool freeCamClearQueued;
+        bool developerInspectorVisible;
         UserPaths userPaths;
         std::unique_ptr<Interpreter> interpreter;
         std::unique_ptr<State> state;
@@ -156,6 +158,7 @@ namespace RT64 {
         SetupResult setup(uint32_t threadId);
         void processDisplayLists(uint8_t *memory, uint32_t dlStartAddress, uint32_t dlEndAddress, bool isHLE);
         void updateScreen();
+        void updateScreenIfFramebufferChanged();
         void destroyShaderCache();
         void updateMultisampling();
         void end();

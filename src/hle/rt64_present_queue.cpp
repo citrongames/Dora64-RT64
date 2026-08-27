@@ -117,6 +117,7 @@ namespace RT64 {
         RenderTarget *colorTarget = nullptr;
         int32_t framesToPresent = 1;
         bool lockedWorkloadMutex = false;
+        const bool hasExternalFramebufferWrites = !present.fbOperations.empty();
         InterpolatedFrameCounters &frameCounters = ext.sharedResources->interpolatedFrames[ext.sharedResources->interpolatedFramesIndex];
 
         // TODO: There's a possible race condition interactions that can happen while the workload
@@ -126,7 +127,13 @@ namespace RT64 {
         // likely be solved by locking the access to the managers during modification.
         
         // Perform any external write operations indicated by the event.
-        if (!present.fbOperations.empty()) {
+        if (hasExternalFramebufferWrites) {
+            // The workload queue writes to the same render targets. Keep it from
+            // replacing CPU-authored framebuffer changes (for example text)
+            // between applying the changes and presenting the image.
+            lockedWorkloadMutex = true;
+            ext.sharedResources->workloadMutex.lock();
+
             const std::scoped_lock lock(screenFbChangePoolMutex);
             {
                 RenderWorkerExecution workerExecution(ext.presentGraphicsWorker);
@@ -167,7 +174,8 @@ namespace RT64 {
                     // When the skip buffering option is on, we check the video history to find if any of the framebuffers that
                     // were drawn in this frame have been previously used for presentation. This is ignored when the debugger
                     // has forced viewing a particular framebuffer.
-                    if (!present.debuggerFramebuffer.view && (presentationMode == EnhancementConfiguration::Presentation::Mode::SkipBuffering)) {
+                    if (!present.debuggerFramebuffer.view && !hasExternalFramebufferWrites &&
+                        (presentationMode == EnhancementConfiguration::Presentation::Mode::SkipBuffering)) {
                         for (size_t h = 0; h < viHistory.history.size(); h++) {
                             const VIHistory::Present &entry = viHistory.history[h];
                             if ((colorFb->addressStart == entry.vi.fbAddress()) && (colorFb->width == entry.fbWidth) && (colorFb->siz == entry.vi.fbSiz()) && entry.vi.compatibleWith(present.screenVI)) {
@@ -186,10 +194,12 @@ namespace RT64 {
                     }
                 }
 
-                if (presentFb->interpolationEnabled) {
+                // Interpolated targets were rendered before the CPU changes were
+                // submitted, so they cannot be used for this presentation.
+                if (presentFb->interpolationEnabled && !hasExternalFramebufferWrites) {
                     framesToPresent = frameCounters.count;
                 }
-                else {
+                else if (!lockedWorkloadMutex) {
                     lockedWorkloadMutex = true;
                     ext.sharedResources->workloadMutex.lock();
                 }
