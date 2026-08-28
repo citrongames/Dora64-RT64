@@ -569,64 +569,24 @@ namespace RT64 {
 
 #ifdef _WIN32
     bool Application::windowMessageFilter(unsigned int message, WPARAM wParam, LPARAM lParam) {
-        if (userConfig.developerMode && (presentQueue != nullptr) && (state != nullptr) && !FileDialog::isOpen) {
+        if ((userConfig.developerMode || (appConfig.drawOverlay != nullptr)) &&
+            (presentQueue != nullptr) && (state != nullptr) && !FileDialog::isOpen) {
             const std::lock_guard lock(presentQueue->inspectorMutex);
             if ((presentQueue->inspector != nullptr) && presentQueue->inspector->handleMessage(message, wParam, lParam)) {
                 return true;
             }
         }
 
-        switch (message) {
-        case WM_KEYDOWN: {
-            switch (wParam) {
-            case VK_F1:
-                processDeveloperShortcut(DeveloperShortcut::Inspector);
-                return true;
-            case VK_F2:
-                processDeveloperShortcut(DeveloperShortcut::RayTracing);
-                return true;
-            case VK_F3:
-                processDeveloperShortcut(DeveloperShortcut::ViewRDRAM);
-                return true;
-            case VK_F4:
-                processDeveloperShortcut(DeveloperShortcut::Replacements);
-                return true;
-            default:
-                // Unknown shortcut.
-                break;
-            }
-        }
-        };
-
         return false;
     }
 #endif
 
     bool Application::sdlEventFilter(SDL_Event *event) {
-        if (userConfig.developerMode && (presentQueue != nullptr) && (state != nullptr) && !FileDialog::isOpen) {
+        if ((userConfig.developerMode || (appConfig.drawOverlay != nullptr)) &&
+            (presentQueue != nullptr) && (state != nullptr) && !FileDialog::isOpen) {
             const std::lock_guard lock(presentQueue->inspectorMutex);
             if ((presentQueue->inspector != nullptr) && presentQueue->inspector->handleSdlEvent(event)) {
                 return true;
-            }
-        }
-
-        if (event->type == SDL_KEYDOWN) {
-            switch (event->key.keysym.scancode) {
-            case SDL_SCANCODE_F1:
-                processDeveloperShortcut(DeveloperShortcut::Inspector);
-                return true;
-            case SDL_SCANCODE_F2:
-                processDeveloperShortcut(DeveloperShortcut::RayTracing);
-                return true;
-            case SDL_SCANCODE_F3:
-                processDeveloperShortcut(DeveloperShortcut::ViewRDRAM);
-                return true;
-            case SDL_SCANCODE_F4:
-                processDeveloperShortcut(DeveloperShortcut::Replacements);
-                return true;
-            default:
-                // Don't filter the key event.
-                break;
             }
         }
 

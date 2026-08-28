@@ -251,7 +251,38 @@ namespace RT64 {
 
 #ifdef _WIN32
     bool Inspector::handleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
-        return ImGui_ImplWin32_WndProcHandler(swapChain->getWindow(), msg, wParam, lParam);
+        const bool processed =
+            ImGui_ImplWin32_WndProcHandler(swapChain->getWindow(), msg, wParam, lParam) != 0;
+        if (!processed) {
+            return false;
+        }
+
+        switch (msg) {
+        case WM_KEYDOWN:
+        case WM_KEYUP:
+        case WM_SYSKEYDOWN:
+        case WM_SYSKEYUP:
+        case WM_CHAR:
+            return ImGui::GetIO().WantCaptureKeyboard;
+        case WM_MOUSEMOVE:
+        case WM_LBUTTONDOWN:
+        case WM_LBUTTONUP:
+        case WM_LBUTTONDBLCLK:
+        case WM_RBUTTONDOWN:
+        case WM_RBUTTONUP:
+        case WM_RBUTTONDBLCLK:
+        case WM_MBUTTONDOWN:
+        case WM_MBUTTONUP:
+        case WM_MBUTTONDBLCLK:
+        case WM_XBUTTONDOWN:
+        case WM_XBUTTONUP:
+        case WM_XBUTTONDBLCLK:
+        case WM_MOUSEWHEEL:
+        case WM_MOUSEHWHEEL:
+            return ImGui::GetIO().WantCaptureMouse;
+        default:
+            return false;
+        }
     }
 #endif
 
