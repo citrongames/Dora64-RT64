@@ -30,6 +30,11 @@ namespace RT64 {
     struct ApplicationWindow {
         static ApplicationWindow *HookedApplicationWindow;
 
+        enum class DisplayMode {
+            Windowed,
+            BorderlessFullscreen
+        };
+
         struct Listener {
             virtual bool usesWindowMessageFilter() = 0;
 
@@ -68,6 +73,7 @@ namespace RT64 {
         void setup(RenderWindow window, Listener *listener, uint32_t threadId);
         void setup(const char *windowTitle, Listener *listener);
         void setFullScreen(bool newFullScreen);
+        bool setDisplayConfig(DisplayMode mode, int32_t displayIndex, int32_t width, int32_t height, int32_t requestedRefreshRate);
         void makeResizable();
         void detectRefreshRate();
         uint32_t getRefreshRate() const;

@@ -175,5 +175,6 @@ namespace RT64 {
         void updateEmulatorConfig();
         void updateEnhancementConfig();
         void setFullScreen(bool fullscreen);
+        bool setDisplayConfig(ApplicationWindow::DisplayMode mode, int32_t displayIndex, int32_t width, int32_t height, int32_t refreshRate);
     };
 };

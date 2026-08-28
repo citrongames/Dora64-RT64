@@ -4,6 +4,7 @@
 
 #include "rt64_application_window.h"
 
+#include <algorithm>
 #include <cassert>
 #include <stdio.h>
 #include <SDL.h>
@@ -237,6 +238,132 @@ namespace RT64 {
         }
         fullScreen = newFullScreen;
 #   endif
+    }
+
+    bool ApplicationWindow::setDisplayConfig(DisplayMode mode, int32_t displayIndex, int32_t width, int32_t height, int32_t requestedRefreshRate) {
+        if (sdlWindow == nullptr) {
+            setFullScreen(mode == DisplayMode::BorderlessFullscreen);
+            return true;
+        }
+
+        const int displayCount = SDL_GetNumVideoDisplays();
+        if (displayCount <= 0) {
+            fprintf(stderr, "SDL_GetNumVideoDisplays failed: %s\n", SDL_GetError());
+            return false;
+        }
+
+        displayIndex = std::clamp(displayIndex, 0, displayCount - 1);
+        width = std::max(width, 320);
+        height = std::max(height, 240);
+        (void)requestedRefreshRate;
+
+        const uint32_t currentFlags = SDL_GetWindowFlags(sdlWindow);
+        if ((mode == DisplayMode::Windowed) ||
+            ((currentFlags & SDL_WINDOW_FULLSCREEN) != 0)) {
+            if (SDL_SetWindowFullscreen(sdlWindow, 0) != 0) {
+                fprintf(stderr, "Unable to leave fullscreen mode: %s\n", SDL_GetError());
+                return false;
+            }
+        }
+
+        if (SDL_SetWindowDisplayMode(sdlWindow, nullptr) != 0) {
+            fprintf(stderr, "Unable to reset the SDL display mode: %s\n", SDL_GetError());
+            return false;
+        }
+
+        const int centered = SDL_WINDOWPOS_CENTERED_DISPLAY(displayIndex);
+        SDL_SetWindowPosition(sdlWindow, centered, centered);
+
+        if (mode == DisplayMode::Windowed) {
+#       ifdef _WIN32
+            // SDL can leave an externally hooked HWND with the popup style
+            // after fullscreen. Restore the normal window chrome
+            // explicitly before applying the requested client size.
+            LONG_PTR windowStyle = GetWindowLongPtr(windowHandle, GWL_STYLE);
+            windowStyle = (windowStyle | WS_VISIBLE | WS_OVERLAPPEDWINDOW) & ~WS_POPUP;
+            SetWindowLongPtr(windowHandle, GWL_STYLE, windowStyle);
+            SetWindowPos(
+                windowHandle,
+                HWND_NOTOPMOST,
+                0,
+                0,
+                0,
+                0,
+                SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            if (windowMenu != nullptr) {
+                SetMenu(windowHandle, windowMenu);
+            }
+#       endif
+            SDL_RestoreWindow(sdlWindow);
+            SDL_SetWindowSize(sdlWindow, width, height);
+
+            SDL_Rect usableBounds{};
+            if (SDL_GetDisplayUsableBounds(displayIndex, &usableBounds) == 0) {
+#           ifdef _WIN32
+                // SDL positions the client origin for this externally hooked
+                // HWND, which puts the non-client title bar above Y=0 for an
+                // oversized window. Position the outer Win32 rectangle directly
+                // so the title bar always remains inside the monitor work area.
+                RECT outerRect{};
+                GetWindowRect(windowHandle, &outerRect);
+                const int outerWidth = outerRect.right - outerRect.left;
+                const int outerHeight = outerRect.bottom - outerRect.top;
+                const int windowX = usableBounds.x +
+                    std::max((usableBounds.w - outerWidth) / 2, 0);
+                const int windowY = usableBounds.y +
+                    std::max((usableBounds.h - outerHeight) / 2, 0);
+                SetWindowPos(
+                    windowHandle,
+                    nullptr,
+                    windowX,
+                    windowY,
+                    0,
+                    0,
+                    SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+#           else
+                int borderTop = 0;
+                int borderLeft = 0;
+                int borderBottom = 0;
+                int borderRight = 0;
+                SDL_GetWindowBordersSize(
+                    sdlWindow,
+                    &borderTop,
+                    &borderLeft,
+                    &borderBottom,
+                    &borderRight);
+
+                const int outerWidth = width + borderLeft + borderRight;
+                const int outerHeight = height + borderTop + borderBottom;
+                const int outerX = usableBounds.x +
+                    std::max((usableBounds.w - outerWidth) / 2, 0);
+                const int outerY = usableBounds.y +
+                    std::max((usableBounds.h - outerHeight) / 2, 0);
+                const int windowX = outerX + borderLeft;
+                const int windowY = outerY + borderTop;
+                SDL_SetWindowPosition(sdlWindow, windowX, windowY);
+#           endif
+            }
+            else {
+                fprintf(stderr, "Unable to query display usable bounds: %s\n", SDL_GetError());
+                SDL_SetWindowPosition(sdlWindow, centered, centered);
+            }
+            fullScreen = false;
+            detectRefreshRate();
+            return true;
+        }
+
+        if (SDL_SetWindowFullscreen(sdlWindow, SDL_WINDOW_FULLSCREEN_DESKTOP) != 0) {
+            fprintf(stderr, "Unable to enter fullscreen mode: %s\n", SDL_GetError());
+            SDL_SetWindowDisplayMode(sdlWindow, nullptr);
+            SDL_SetWindowSize(sdlWindow, width, height);
+            SDL_SetWindowPosition(sdlWindow, centered, centered);
+            fullScreen = false;
+            return false;
+        }
+
+        fullScreen = true;
+        detectRefreshRate();
+        return true;
     }
 
     void ApplicationWindow::makeResizable() {
