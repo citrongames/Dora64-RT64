@@ -32,7 +32,7 @@ namespace RT64 {
         Inspector(RenderDevice *device, const RenderSwapChain *swapChain, UserConfiguration::GraphicsAPI graphicsAPI, SDL_Window *sdlWindow);
         ~Inspector();
         void setIniPath(const std::filesystem::path &path);
-        void newFrame(RenderWorker *worker);
+        void newFrame(RenderWorker *worker, void (*updateOverlayInput)());
         void endFrame();
         void draw(RenderCommandList *commandList);
 #   ifdef _WIN32

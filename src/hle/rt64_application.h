@@ -40,6 +40,7 @@ namespace RT64 {
         std::filesystem::path dataPath;
         bool detectDataPath = true;
         bool useConfigurationFile = true;
+        void (*updateOverlayInput)() = nullptr;
         void (*drawOverlay)() = nullptr;
     };
 

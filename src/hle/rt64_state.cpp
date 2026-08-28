@@ -2011,7 +2011,9 @@ namespace RT64 {
             return;
         }
 
-        inspector->newFrame(ext.framebufferGraphicsWorker);
+        inspector->newFrame(
+            ext.framebufferGraphicsWorker,
+            ext.app->appConfig.updateOverlayInput);
         if (ext.app->appConfig.drawOverlay != nullptr) {
             ext.app->appConfig.drawOverlay();
         }

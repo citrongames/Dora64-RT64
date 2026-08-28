@@ -180,7 +180,7 @@ namespace RT64 {
         io.IniFilename = IniFilenameUTF8.c_str();
     }
     
-    void Inspector::newFrame(RenderWorker *worker) {
+    void Inspector::newFrame(RenderWorker *worker, void (*updateOverlayInput)()) {
         assert(worker != nullptr);
 
         frameMutex.lock();
@@ -210,6 +210,10 @@ namespace RT64 {
         default:
             assert(false && "Unknown Graphics API.");
             break;
+        }
+
+        if (updateOverlayInput != nullptr) {
+            updateOverlayInput();
         }
 
         ImGui::NewFrame();
