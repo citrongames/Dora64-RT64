@@ -1456,6 +1456,44 @@ namespace RT64 {
                 continue;
             }
 
+            uint32_t regularRectangleCount = 0;
+            FixedRect regularRectangleBounds;
+            bool hasRegularRectangleBounds = false;
+            if ((pr == 0) && (proj.type == Projection::Type::Rectangle)) {
+                for (uint32_t candidateCallIndex = 0; candidateCallIndex < proj.gameCallCount; candidateCallIndex++) {
+                    const GameCall &candidateCall = proj.gameCalls[candidateCallIndex];
+                    const bool regularRectangle =
+                        (candidateCall.callDesc.otherMode.cycleType() != G_CYC_FILL) &&
+                        (candidateCall.callDesc.extendedType == DrawExtendedType::None);
+                    if (regularRectangle) {
+                        regularRectangleCount++;
+                        if (hasRegularRectangleBounds) {
+                            regularRectangleBounds.merge(candidateCall.callDesc.rect);
+                        }
+                        else {
+                            regularRectangleBounds = candidateCall.callDesc.rect;
+                            hasRegularRectangleBounds = true;
+                        }
+                    }
+                }
+            }
+
+            const bool rectangleMosaicCoversScissor = hasRegularRectangleBounds &&
+                (regularRectangleBounds.ulx <= fbPair.scissorRect.ulx) &&
+                (regularRectangleBounds.uly <= fbPair.scissorRect.uly) &&
+                (regularRectangleBounds.lrx >= fbPair.scissorRect.lrx) &&
+                (regularRectangleBounds.lry >= fbPair.scissorRect.lry);
+
+            // Doraemon draws the scrolling sky as a compact mosaic of large
+            // rectangles. Count only those raster rectangles so leading clears
+            // and synchronization calls do not affect detection. Pure 2D menus
+            // use a different number/layout and retain their original 4:3 form.
+            const bool wideBackgroundProjection =
+                (aspectRatioScale > 1.01f) && (pr == 0) &&
+                (proj.type == Projection::Type::Rectangle) &&
+                (regularRectangleCount >= 8) && (regularRectangleCount <= 16) &&
+                rectangleMosaicCoversScissor;
+
 #       if RT_ENABLED
             // TODO: Move heuristics of RT proj elsewhere?
             // TODO: Use detected scenes logic instead.
@@ -1652,6 +1690,11 @@ namespace RT64 {
                                 horizontalMisalignment = p.horizontalMisalignment;
                             }
 
+                            if (wideBackgroundProjection) {
+                                invRatioScale = 1.0f;
+                                horizontalMisalignment = 0.0f;
+                            }
+
                             RenderViewport viewportRect = convertViewportRect(call.callDesc.rect, p.resolutionScale, p.fbWidth, invRatioScale, extOriginPercentage, horizontalMisalignment, call.callDesc.rectLeftOrigin, call.callDesc.rectRightOrigin);
                             triangles.screenScale = { viewportRect.width / framebuffer.viewport.width, viewportRect.height / framebuffer.viewport.height };
                             triangles.screenOffset.x = halfPixelOffset.x + ((viewportRect.x + viewportRect.width / 2.0f) - halfViewportSize.x) / halfViewportSize.x;
@@ -1677,6 +1720,11 @@ namespace RT64 {
                         }
 
                         triangles.scissor = convertFixedRect(call.callDesc.scissorRect, p.resolutionScale, p.fbWidth, invRatioScale, extOriginPercentage, int32_t(horizontalMisalignment), call.callDesc.scissorLeftOrigin, call.callDesc.scissorRightOrigin);
+
+                        if (wideBackgroundProjection) {
+                            triangles.scissor.left = 0;
+                            triangles.scissor.right = lround(wideWidth);
+                        }
 
                         bool usesViewport = (proj.type == Projection::Type::Perspective) || (proj.type == Projection::Type::Orthographic);
                         if (usesViewport) {
