@@ -1450,10 +1450,28 @@ namespace RT64 {
         uint32_t vertexTestZFaceIndicesStart = 0;
         int32_t vertexTestZCallIndex = -1;
         RenderViewport viewportClip;
+
+        const bool widescreenRequested = p.aspectRatioTarget > (p.aspectRatioSource * 1.01f);
+        bool framebufferHasThreeDimensionalProjection = false;
+        for (uint32_t candidateProjectionIndex = 0; candidateProjectionIndex < fbPair.projectionCount; candidateProjectionIndex++) {
+            const Projection::Type candidateType = fbPair.projections[candidateProjectionIndex].type;
+            framebufferHasThreeDimensionalProjection = framebufferHasThreeDimensionalProjection ||
+                (candidateType == Projection::Type::Perspective) ||
+                (candidateType == Projection::Type::Orthographic);
+        }
+
         for (uint32_t pr = 0; (pr < fbPair.projectionCount) && (globalCallIndex < p.maxGameCall); pr++) {
             const Projection &proj = fbPair.projections[pr];
             if (proj.scissorRect.isNull()) {
                 continue;
+            }
+
+            bool precedingThreeDimensionalProjection = false;
+            for (uint32_t precedingProjectionIndex = 0; precedingProjectionIndex < pr; precedingProjectionIndex++) {
+                const Projection::Type precedingType = fbPair.projections[precedingProjectionIndex].type;
+                precedingThreeDimensionalProjection = precedingThreeDimensionalProjection ||
+                    (precedingType == Projection::Type::Perspective) ||
+                    (precedingType == Projection::Type::Orthographic);
             }
 
             uint32_t regularRectangleCount = 0;
@@ -1486,12 +1504,14 @@ namespace RT64 {
 
             // Doraemon draws the scrolling sky as a compact mosaic of large
             // rectangles. Count only those raster rectangles so leading clears
-            // and synchronization calls do not affect detection. Pure 2D menus
-            // use a different number/layout and retain their original 4:3 form.
+            // and synchronization calls do not affect detection. The known sky
+            // layouts use 6-16 rectangles and accompany a 3D projection. Pure
+            // 2D menus use a different number/layout and retain their 4:3 form.
             const bool wideBackgroundProjection =
                 (aspectRatioScale > 1.01f) && (pr == 0) &&
                 (proj.type == Projection::Type::Rectangle) &&
-                (regularRectangleCount >= 8) && (regularRectangleCount <= 16) &&
+                framebufferHasThreeDimensionalProjection &&
+                (regularRectangleCount >= 6) && (regularRectangleCount <= 16) &&
                 rectangleMosaicCoversScissor;
 
 #       if RT_ENABLED
@@ -1519,6 +1539,10 @@ namespace RT64 {
             triangles.screenScale = { 1.0f, 1.0f };
             triangles.screenOffset = halfPixelOffset;
 
+            const bool threeDimensionalProjection =
+                (proj.type == Projection::Type::Perspective) ||
+                (proj.type == Projection::Type::Orthographic);
+            const bool wideThreeDimensionalScissor = widescreenRequested && threeDimensionalProjection;
             float projInvRatioScale = 1.0f / aspectRatioScale;
             const int16_t *viewportClipRatios = &drawData.viewportClipRatios[proj.transformsIndex * 4];
             const uint16_t viewportOrigin = drawData.viewportOrigins[proj.transformsIndex];
@@ -1542,6 +1566,10 @@ namespace RT64 {
                 }
 
                 viewportClip = convertViewportRect(viewport.rect(viewportClipRatios), p.resolutionScale, p.fbWidth, projInvRatioScale, extOriginPercentage, 0.0f, viewportOrigin, viewportOrigin);
+                if (wideThreeDimensionalScissor) {
+                    viewportClip.x = 0.0f;
+                    viewportClip.width = wideWidth;
+                }
             }
 
             for (uint32_t d = 0; (d < proj.gameCallCount) && (globalCallIndex < p.maxGameCall); d++) {
@@ -1576,8 +1604,32 @@ namespace RT64 {
                     float invRatioScale = 1.0f / aspectRatioScale;
                     int32_t horizontalMisalignment = 0;
 
+                    const int32_t fillWidth = call.callDesc.rect.lrx - call.callDesc.rect.ulx;
+                    const int32_t fillHeight = call.callDesc.rect.lry - call.callDesc.rect.uly;
+                    const int32_t framebufferWidth = fbPair.scissorRect.lrx - fbPair.scissorRect.ulx;
+                    const int32_t framebufferHeight = fbPair.scissorRect.lry - fbPair.scissorRect.uly;
+                    const bool fillCoversMostOfFramebuffer =
+                        (fillWidth * 10 >= framebufferWidth * 8) &&
+                        (fillHeight * 10 >= framebufferHeight * 8);
+                    const bool fillScissorCoversFramebuffer =
+                        (call.callDesc.scissorRect.ulx <= fbPair.scissorRect.ulx) &&
+                        (call.callDesc.scissorRect.uly <= fbPair.scissorRect.uly) &&
+                        (call.callDesc.scissorRect.lrx >= fbPair.scissorRect.lrx) &&
+                        (call.callDesc.scissorRect.lry >= fbPair.scissorRect.lry);
+                    // Intro scenes can animate a backdrop fill through many
+                    // colors (for example, fading from black to light blue).
+                    // Extend every large background fill from the first
+                    // rectangle projection instead of matching individual
+                    // colors. The size and scissor checks keep HUD rectangles
+                    // and later full-screen effects out of this path.
+                    const bool wideIntroBackdropFill =
+                        widescreenRequested && (p.fbStorage->colorTarget != nullptr) &&
+                        (pr == 0) && (proj.type == Projection::Type::Rectangle) &&
+                        fillCoversMostOfFramebuffer && fillScissorCoversFramebuffer;
+
                     // A rect that spans the whole width of the scissor.
-                    if ((call.callDesc.rect.ulx <= fbPair.scissorRect.ulx) && (call.callDesc.rect.lrx >= fbPair.scissorRect.lrx)) {
+                    if (wideIntroBackdropFill ||
+                        ((call.callDesc.rect.ulx <= fbPair.scissorRect.ulx) && (call.callDesc.rect.lrx >= fbPair.scissorRect.lrx))) {
                         invRatioScale = 1.0f;
                     }
                     // A regular rectangle that should correct its misalignment.
@@ -1586,6 +1638,10 @@ namespace RT64 {
                     }
 
                     clearRect.rect = convertFixedRect(call.callDesc.rect, p.resolutionScale, p.fbWidth, invRatioScale, extOriginPercentage, horizontalMisalignment, call.callDesc.rectLeftOrigin, call.callDesc.rectRightOrigin);
+                    if (wideIntroBackdropFill) {
+                        clearRect.rect.left = 0;
+                        clearRect.rect.right = lround(wideWidth);
+                    }
                 }
                 else if (call.callDesc.extendedType != DrawExtendedType::None) {
                     switch (call.callDesc.extendedType) {
@@ -1663,6 +1719,42 @@ namespace RT64 {
 
                         float invRatioScale = 1.0f / aspectRatioScale;
                         float horizontalMisalignment = 0.0f;
+                        const bool regularRectangleOrigins =
+                            (call.callDesc.rectLeftOrigin == G_EX_ORIGIN_NONE) &&
+                            (call.callDesc.rectRightOrigin == G_EX_ORIGIN_NONE);
+                        const bool rectangleCoversProjection =
+                            regularRectangleOrigins &&
+                            (call.callDesc.rect.ulx <= proj.scissorRect.ulx) &&
+                            (call.callDesc.rect.uly <= proj.scissorRect.uly) &&
+                            (call.callDesc.rect.lrx >= proj.scissorRect.lrx) &&
+                            (call.callDesc.rect.lry >= proj.scissorRect.lry);
+                        const bool rectangleCoversCallScissor =
+                            regularRectangleOrigins &&
+                            (call.callDesc.rect.ulx <= call.callDesc.scissorRect.ulx) &&
+                            (call.callDesc.rect.uly <= call.callDesc.scissorRect.uly) &&
+                            (call.callDesc.rect.lrx >= call.callDesc.scissorRect.lrx) &&
+                            (call.callDesc.rect.lry >= call.callDesc.scissorRect.lry);
+                        // Full-screen post effects are emitted as a rectangle
+                        // projection after the 3D scene. Expand only that one
+                        // rectangle; HUD elements in the same projection keep
+                        // their original placement and proportions.
+                        const bool wideScreenEffectRectangle =
+                            widescreenRequested && precedingThreeDimensionalProjection &&
+                            (proj.type == Projection::Type::Rectangle) &&
+                            rectangleCoversProjection;
+                        uint64_t rectangleTextureHash = 0;
+                        if (call.callDesc.tileCount > 0) {
+                            rectangleTextureHash = drawData.callTiles[call.callDesc.tileIndex].tmemHashOrID;
+                        }
+                        // The opening EPOCH logo uses a dedicated full-screen
+                        // textured rectangle to fade its 4:3 presentation area
+                        // in and out. Widen the fade layer without stretching
+                        // the three centered rectangles that form the logo.
+                        const bool wideEpochFadeRectangle =
+                            widescreenRequested && (pr == 0) &&
+                            (proj.type == Projection::Type::Rectangle) &&
+                            rectangleCoversCallScissor &&
+                            (rectangleTextureHash == 0x764DFAD2DE1CCFF8ULL);
                         switch (proj.type) {
                         case Projection::Type::Perspective:
                         case Projection::Type::Orthographic: {
@@ -1695,7 +1787,17 @@ namespace RT64 {
                                 horizontalMisalignment = 0.0f;
                             }
 
+                            if (wideScreenEffectRectangle || wideEpochFadeRectangle) {
+                                invRatioScale = 1.0f;
+                                horizontalMisalignment = 0.0f;
+                            }
+
                             RenderViewport viewportRect = convertViewportRect(call.callDesc.rect, p.resolutionScale, p.fbWidth, invRatioScale, extOriginPercentage, horizontalMisalignment, call.callDesc.rectLeftOrigin, call.callDesc.rectRightOrigin);
+                            if (wideScreenEffectRectangle || wideEpochFadeRectangle) {
+                                viewportRect.x = 0.0f;
+                                viewportRect.width = wideWidth;
+                            }
+
                             triangles.screenScale = { viewportRect.width / framebuffer.viewport.width, viewportRect.height / framebuffer.viewport.height };
                             triangles.screenOffset.x = halfPixelOffset.x + ((viewportRect.x + viewportRect.width / 2.0f) - halfViewportSize.x) / halfViewportSize.x;
                             triangles.screenOffset.y = halfPixelOffset.y + (halfViewportSize.y - (viewportRect.y + viewportRect.height / 2.0f)) / halfViewportSize.y;
@@ -1721,7 +1823,17 @@ namespace RT64 {
 
                         triangles.scissor = convertFixedRect(call.callDesc.scissorRect, p.resolutionScale, p.fbWidth, invRatioScale, extOriginPercentage, int32_t(horizontalMisalignment), call.callDesc.scissorLeftOrigin, call.callDesc.scissorRightOrigin);
 
+                        if (wideThreeDimensionalScissor) {
+                            triangles.scissor.left = 0;
+                            triangles.scissor.right = lround(wideWidth);
+                        }
+
                         if (wideBackgroundProjection) {
+                            triangles.scissor.left = 0;
+                            triangles.scissor.right = lround(wideWidth);
+                        }
+
+                        if (wideScreenEffectRectangle || wideEpochFadeRectangle) {
                             triangles.scissor.left = 0;
                             triangles.scissor.right = lround(wideWidth);
                         }
