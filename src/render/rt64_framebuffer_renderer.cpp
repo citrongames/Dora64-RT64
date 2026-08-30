@@ -1446,18 +1446,34 @@ namespace RT64 {
         const interop::float2 halfViewportSize = { framebuffer.viewport.width / 2.0f, framebuffer.viewport.height / 2.0f };
         const interop::float2 halfPixelOffset = { 1.0f / framebuffer.viewport.width, -1.0f / framebuffer.viewport.height };
         const float middleViewport = (wideWidth / 2.0f) - (originalWidth / 2.0f);
+        const float gameplayHudSafeAreaInset = 16.0f * p.resolutionScale.y;
         const float extOriginPercentage = p.extAspectPercentage;
         uint32_t vertexTestZFaceIndicesStart = 0;
         int32_t vertexTestZCallIndex = -1;
         RenderViewport viewportClip;
 
         const bool widescreenRequested = p.aspectRatioTarget > (p.aspectRatioSource * 1.01f);
+        constexpr uint64_t CameraHudTextureHash = 0x45B1E93C8F1A8C14ULL;
+        constexpr uint64_t HeartHudTextureHash = 0xB70CD06BFD5C83D4ULL;
         bool framebufferHasThreeDimensionalProjection = false;
+        bool framebufferHasHeartHudAnchor = false;
         for (uint32_t candidateProjectionIndex = 0; candidateProjectionIndex < fbPair.projectionCount; candidateProjectionIndex++) {
-            const Projection::Type candidateType = fbPair.projections[candidateProjectionIndex].type;
+            const Projection &candidateProjection = fbPair.projections[candidateProjectionIndex];
+            const Projection::Type candidateType = candidateProjection.type;
             framebufferHasThreeDimensionalProjection = framebufferHasThreeDimensionalProjection ||
                 (candidateType == Projection::Type::Perspective) ||
                 (candidateType == Projection::Type::Orthographic);
+            if (candidateType == Projection::Type::Rectangle) {
+                for (uint32_t candidateCallIndex = 0; candidateCallIndex < candidateProjection.gameCallCount; candidateCallIndex++) {
+                    const GameCall &candidateCall = candidateProjection.gameCalls[candidateCallIndex];
+                    if (candidateCall.callDesc.tileCount > 0) {
+                        const uint64_t candidateTextureHash =
+                            drawData.callTiles[candidateCall.callDesc.tileIndex].tmemHashOrID;
+                        framebufferHasHeartHudAnchor = framebufferHasHeartHudAnchor ||
+                            (candidateTextureHash == HeartHudTextureHash);
+                    }
+                }
+            }
         }
 
         for (uint32_t pr = 0; (pr < fbPair.projectionCount) && (globalCallIndex < p.maxGameCall); pr++) {
@@ -1472,6 +1488,25 @@ namespace RT64 {
                 precedingThreeDimensionalProjection = precedingThreeDimensionalProjection ||
                     (precedingType == Projection::Type::Perspective) ||
                     (precedingType == Projection::Type::Orthographic);
+            }
+
+            // Values and collectible types change the hashes of the HUD's
+            // number/icon tiles. The camera is kept as a projection-local
+            // anchor so dialogue portraits cannot be mistaken for its group.
+            // The persistent heart is scanned across the whole framebuffer
+            // above because death bars can briefly split the other HUD tiles
+            // into separate rectangle projections.
+            bool projectionHasCameraHudAnchor = false;
+            if (precedingThreeDimensionalProjection && (proj.type == Projection::Type::Rectangle)) {
+                for (uint32_t candidateCallIndex = 0; candidateCallIndex < proj.gameCallCount; candidateCallIndex++) {
+                    const GameCall &candidateCall = proj.gameCalls[candidateCallIndex];
+                    if (candidateCall.callDesc.tileCount > 0) {
+                        const uint64_t candidateTextureHash =
+                            drawData.callTiles[candidateCall.callDesc.tileIndex].tmemHashOrID;
+                        projectionHasCameraHudAnchor = projectionHasCameraHudAnchor ||
+                            (candidateTextureHash == CameraHudTextureHash);
+                    }
+                }
             }
 
             uint32_t regularRectangleCount = 0;
@@ -1758,6 +1793,67 @@ namespace RT64 {
                             rectangleCoversCallScissor &&
                             ((rectangleTextureHash == 0x764DFAD2DE1CCFF8ULL) ||
                              (rectangleTextureHash == 0xA7885397FC5FAD93ULL));
+                        // Doraemon's gameplay HUD is emitted as compact regular
+                        // rectangles in the four corners after the 3D scene. Move
+                        // those rectangles by exactly the widescreen side margin,
+                        // preserving their original size. The size, position and
+                        // projection checks exclude dialogue strips, menus, the
+                        // item book and full-screen effects. They also cover both
+                        // changing counter values and both A/B variants of the
+                        // lower-left camera indicator.
+                        const int32_t hudScissorLeft = fbPair.scissorRect.left(false);
+                        const int32_t hudScissorTop = fbPair.scissorRect.top(false);
+                        const int32_t hudScissorWidth = fbPair.scissorRect.width(false, true);
+                        const int32_t hudScissorHeight = fbPair.scissorRect.height(false, true);
+                        const bool hasHudRectangle =
+                            (proj.type == Projection::Type::Rectangle) &&
+                            !call.callDesc.rect.isNull();
+                        const int32_t hudRectangleWidth = hasHudRectangle
+                            ? call.callDesc.rect.width(false, true) : 0;
+                        const int32_t hudRectangleHeight = hasHudRectangle
+                            ? call.callDesc.rect.height(false, true) : 0;
+                        const int32_t hudRectangleCenterX =
+                            hasHudRectangle
+                                ? (call.callDesc.rect.left(false) + call.callDesc.rect.right(true)) / 2
+                                : 0;
+                        // RT64 can round or interpolate one edge of these 16x16
+                        // rectangles by a source pixel during transitions. Keep
+                        // the tile classified as HUD instead of letting it jump
+                        // back to its original 4:3 position for that frame.
+                        const bool standardGameplayHudTile =
+                            (hudRectangleWidth >= 15) && (hudRectangleWidth <= 17) &&
+                            (hudRectangleHeight >= 15) && (hudRectangleHeight <= 17);
+                        const bool hudRectangleAtTop =
+                            hasHudRectangle && (call.callDesc.rect.bottom(true) <=
+                            (hudScissorTop + (hudScissorHeight * 3) / 10));
+                        const bool hudRectangleAtBottom =
+                            hasHudRectangle && (call.callDesc.rect.top(false) >=
+                            (hudScissorTop + (hudScissorHeight * 7) / 10));
+                        const bool hudRectangleAtLeft =
+                            hasHudRectangle && (hudRectangleCenterX <=
+                            (hudScissorLeft + (hudScissorWidth * 2) / 5));
+                        const bool hudRectangleAtRight =
+                            hasHudRectangle && (hudRectangleCenterX >=
+                            (hudScissorLeft + (hudScissorWidth * 3) / 5));
+                        const int32_t gameplayHudHorizontalDirection =
+                            hudRectangleAtLeft ? -1 : (hudRectangleAtRight ? 1 : 0);
+                        const bool anchoredGameplayHudGroup = standardGameplayHudTile && (
+                            (hudRectangleAtTop && hudRectangleAtLeft &&
+                                framebufferHasHeartHudAnchor) ||
+                            (hudRectangleAtTop && hudRectangleAtRight &&
+                                framebufferHasHeartHudAnchor) ||
+                            (hudRectangleAtBottom && hudRectangleAtLeft &&
+                                projectionHasCameraHudAnchor) ||
+                            (hudRectangleAtBottom && hudRectangleAtRight &&
+                                framebufferHasHeartHudAnchor));
+                        const bool fitGameplayHudRectangle =
+                            widescreenRequested && (extOriginPercentage > 0.99f) &&
+                            precedingThreeDimensionalProjection &&
+                            (proj.type == Projection::Type::Rectangle) &&
+                            regularRectangleOrigins &&
+                            (hudRectangleAtTop || hudRectangleAtBottom) &&
+                            (gameplayHudHorizontalDirection != 0) &&
+                            anchoredGameplayHudGroup;
                         switch (proj.type) {
                         case Projection::Type::Perspective:
                         case Projection::Type::Orthographic: {
@@ -1800,6 +1896,10 @@ namespace RT64 {
                                 viewportRect.x = 0.0f;
                                 viewportRect.width = wideWidth;
                             }
+                            else if (fitGameplayHudRectangle) {
+                                viewportRect.x += gameplayHudHorizontalDirection *
+                                    (middleViewport + gameplayHudSafeAreaInset);
+                            }
 
                             triangles.screenScale = { viewportRect.width / framebuffer.viewport.width, viewportRect.height / framebuffer.viewport.height };
                             triangles.screenOffset.x = halfPixelOffset.x + ((viewportRect.x + viewportRect.width / 2.0f) - halfViewportSize.x) / halfViewportSize.x;
@@ -1837,6 +1937,11 @@ namespace RT64 {
                         }
 
                         if (wideScreenEffectRectangle || wideEpochFadeRectangle) {
+                            triangles.scissor.left = 0;
+                            triangles.scissor.right = lround(wideWidth);
+                        }
+
+                        if (fitGameplayHudRectangle) {
                             triangles.scissor.left = 0;
                             triangles.scissor.right = lround(wideWidth);
                         }
