@@ -1508,7 +1508,7 @@ namespace RT64 {
             // layouts use 6-16 rectangles and accompany a 3D projection. Pure
             // 2D menus use a different number/layout and retain their 4:3 form.
             const bool wideBackgroundProjection =
-                (aspectRatioScale > 1.01f) && (pr == 0) &&
+                widescreenRequested && (pr == 0) &&
                 (proj.type == Projection::Type::Rectangle) &&
                 framebufferHasThreeDimensionalProjection &&
                 (regularRectangleCount >= 6) && (regularRectangleCount <= 16) &&
