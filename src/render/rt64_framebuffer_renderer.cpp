@@ -1748,13 +1748,16 @@ namespace RT64 {
                         }
                         // The opening EPOCH logo uses a dedicated full-screen
                         // textured rectangle to fade its 4:3 presentation area
-                        // in and out. Widen the fade layer without stretching
-                        // the three centered rectangles that form the logo.
+                        // in and out. Its texture contents differ when the game
+                        // returns to the intro after the ending. Widen both
+                        // observed fade variants without stretching the three
+                        // centered rectangles that form the logo.
                         const bool wideEpochFadeRectangle =
                             widescreenRequested && (pr == 0) &&
                             (proj.type == Projection::Type::Rectangle) &&
                             rectangleCoversCallScissor &&
-                            (rectangleTextureHash == 0x764DFAD2DE1CCFF8ULL);
+                            ((rectangleTextureHash == 0x764DFAD2DE1CCFF8ULL) ||
+                             (rectangleTextureHash == 0xA7885397FC5FAD93ULL));
                         switch (proj.type) {
                         case Projection::Type::Perspective:
                         case Projection::Type::Orthographic: {
