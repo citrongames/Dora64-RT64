@@ -115,6 +115,7 @@ namespace RT64 {
         uint64_t hash = 0;
         Texture *texture = nullptr;
         ReplacementShift shift = ReplacementShift::None;
+        bool forceNearestFiltering = false;
         bool referenceCounted = false;
     };
 
@@ -125,6 +126,7 @@ namespace RT64 {
         std::vector<Texture *> textureReplacements;
         std::vector<interop::float3> cachedTextureReplacementDimensions;
         std::vector<bool> textureReplacementShiftedByHalf;
+        std::vector<bool> textureReplacementForceNearestFiltering;
         std::vector<bool> textureReplacementReferenceCounted;
         std::vector<interop::float2> textureScales;
         std::vector<uint64_t> hashes;
@@ -142,8 +144,8 @@ namespace RT64 {
         ~TextureMap();
         void clearReplacements();
         void add(uint64_t hash, uint64_t creationFrame, Texture *texture);
-        void replace(uint64_t hash, Texture *texture, bool shiftedByHalf, bool referenceCounted);
-        bool use(uint64_t hash, uint64_t submissionFrame, uint32_t &textureIndex, interop::float2 &textureScale, interop::float3 &textureDimensions, bool &textureReplaced, bool &hasMipmaps, bool &shiftedByHalf);
+        void replace(uint64_t hash, Texture *texture, bool shiftedByHalf, bool forceNearestFiltering, bool referenceCounted);
+        bool use(uint64_t hash, uint64_t submissionFrame, uint32_t &textureIndex, interop::float2 &textureScale, interop::float3 &textureDimensions, bool &textureReplaced, bool &hasMipmaps, bool &shiftedByHalf, bool &forceNearestFiltering);
         bool evict(uint64_t submissionFrame, std::vector<uint64_t> &evictedHashes);
         void incrementLock();
         void decrementLock();
@@ -236,7 +238,7 @@ namespace RT64 {
         void queueGPUUploadTMEM(uint64_t hash, uint64_t creationFrame, const uint8_t *bytes, int bytesCount, int width, int height, uint32_t tlut, const LoadTile &loadTile, bool decodeTMEM);
         void waitForGPUUploads();
         void addResolvedPaths(uint64_t hash, uint32_t width, uint32_t height, uint32_t tlut, const LoadTile &loadTile, const std::vector<uint8_t> &bytesTMEM, bool decodeTMEM, std::vector<ReplacementResolvedPath> &resolvedPaths, uint64_t exclusiveDbHash = 0);
-        bool useTexture(uint64_t hash, uint64_t submissionFrame, uint32_t &textureIndex, interop::float2 &textureScale, interop::float3 &textureDimensions, bool &textureReplaced, bool &hasMipmaps, bool &shiftedByHalf);
+        bool useTexture(uint64_t hash, uint64_t submissionFrame, uint32_t &textureIndex, interop::float2 &textureScale, interop::float3 &textureDimensions, bool &textureReplaced, bool &hasMipmaps, bool &shiftedByHalf, bool &forceNearestFiltering);
         bool useTexture(uint64_t hash, uint64_t submissionFrame, uint32_t &textureIndex);
         bool addReplacement(uint64_t hash, const std::string &relativePath, ReplacementShift shift);
         bool hasReplacement(uint64_t hash);

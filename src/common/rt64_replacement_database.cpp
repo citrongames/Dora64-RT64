@@ -186,6 +186,7 @@ namespace RT64 {
             resolvedPath.originalShift = shift;
             resolvedPath.resolvedOperation = resolveOperation(relativePath, operation);
             resolvedPath.resolvedShift = resolveShift(relativePath, shift);
+            resolvedPath.forceNearestFiltering = config.forceNearestFiltering;
 
             if ((resolvedPath.resolvedOperation == ReplacementOperation::Preload) && (pathsToPreload != nullptr)) {
                 pathsToPreload->insert(relativePath);
@@ -313,6 +314,7 @@ namespace RT64 {
         j["autoPath"] = config.autoPath;
         j["defaultOperation"] = config.defaultOperation;
         j["defaultShift"] = config.defaultShift;
+        j["forceNearestFiltering"] = config.forceNearestFiltering;
         j["hashVersion"] = config.hashVersion;
     }
 
@@ -325,6 +327,7 @@ namespace RT64 {
         config.autoPath = j.value("autoPath", defaultConfig.autoPath);
         config.defaultOperation = j.value("defaultOperation", defaultConfig.defaultOperation);
         config.defaultShift = j.value("defaultShift", defaultShift);
+        config.forceNearestFiltering = j.value("forceNearestFiltering", defaultConfig.forceNearestFiltering);
         config.hashVersion = j.value("hashVersion", 1);
     }
 

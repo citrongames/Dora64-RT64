@@ -206,6 +206,7 @@ namespace RT64 {
             if (textureReplacements[i] != nullptr) {
                 textureReplacements[i] = nullptr;
                 textureReplacementShiftedByHalf[i] = false;
+                textureReplacementForceNearestFiltering[i] = false;
                 textureReplacementReferenceCounted[i] = false;
                 versions[i]++;
             }
@@ -230,6 +231,7 @@ namespace RT64 {
             textureReplacements.push_back(nullptr);
             cachedTextureReplacementDimensions.emplace_back();
             textureReplacementShiftedByHalf.emplace_back(false);
+            textureReplacementForceNearestFiltering.emplace_back(false);
             textureReplacementReferenceCounted.emplace_back(false);
             textureScales.push_back(IdentityScale);
             hashes.push_back(0);
@@ -243,6 +245,7 @@ namespace RT64 {
         cachedTextureDimensions[textureIndex] = interop::float3(float(texture->width), float(texture->height), 1.0f);
         textureReplacements[textureIndex] = nullptr;
         textureReplacementShiftedByHalf[textureIndex] = false;
+        textureReplacementForceNearestFiltering[textureIndex] = false;
         textureReplacementReferenceCounted[textureIndex] = false;
         textureScales[textureIndex] = IdentityScale;
         hashes[textureIndex] = hash;
@@ -254,7 +257,7 @@ namespace RT64 {
         listIterators[textureIndex] = accessList.begin();
     }
 
-    void TextureMap::replace(uint64_t hash, Texture *texture, bool shiftedByHalf, bool referenceCounted) {
+    void TextureMap::replace(uint64_t hash, Texture *texture, bool shiftedByHalf, bool forceNearestFiltering, bool referenceCounted) {
         const auto it = hashMap.find(hash);
         if (it == hashMap.end()) {
             return;
@@ -265,6 +268,7 @@ namespace RT64 {
         if (texture == textureReplacements[it->second]) {
             // The exception is that the shifting mode can be changed in real-time by the user while editing, so we update it regardless.
             textureReplacementShiftedByHalf[it->second] = shiftedByHalf;
+            textureReplacementForceNearestFiltering[it->second] = forceNearestFiltering;
             return;
         }
 
@@ -276,6 +280,7 @@ namespace RT64 {
         Texture *replacedTexture = textures[it->second];
         textureReplacements[it->second] = texture;
         textureReplacementShiftedByHalf[it->second] = shiftedByHalf;
+        textureReplacementForceNearestFiltering[it->second] = forceNearestFiltering;
         textureReplacementReferenceCounted[it->second] = referenceCounted;
         textureScales[it->second] = { float(texture->width) / float(replacedTexture->width), float(texture->height) / float(replacedTexture->height) };
         cachedTextureReplacementDimensions[it->second] = interop::float3(float(texture->width), float(texture->height), float(texture->mipmaps));
@@ -288,10 +293,11 @@ namespace RT64 {
         }
     }
 
-    bool TextureMap::use(uint64_t hash, uint64_t submissionFrame, uint32_t &textureIndex, interop::float2 &textureScale, interop::float3 &textureDimensions, bool &textureReplaced, bool &hasMipmaps, bool &shiftedByHalf) {
+    bool TextureMap::use(uint64_t hash, uint64_t submissionFrame, uint32_t &textureIndex, interop::float2 &textureScale, interop::float3 &textureDimensions, bool &textureReplaced, bool &hasMipmaps, bool &shiftedByHalf, bool &forceNearestFiltering) {
         textureScale = IdentityScale;
         hasMipmaps = false;
         shiftedByHalf = false;
+        forceNearestFiltering = false;
 
         // Find the matching texture index in the hash map.
         const auto it = hashMap.find(hash);
@@ -308,6 +314,7 @@ namespace RT64 {
             textureDimensions = cachedTextureReplacementDimensions[textureIndex];
             hasMipmaps = (textureReplacements[textureIndex]->mipmaps > 1);
             shiftedByHalf = textureReplacementShiftedByHalf[textureIndex];
+            forceNearestFiltering = textureReplacementForceNearestFiltering[textureIndex];
         }
         else {
             textureDimensions = cachedTextureDimensions[textureIndex];
@@ -361,6 +368,7 @@ namespace RT64 {
 
                 textureReplacements[textureIndex] = nullptr;
                 textureReplacementShiftedByHalf[textureIndex] = false;
+                textureReplacementForceNearestFiltering[textureIndex] = false;
                 textureReplacementReferenceCounted[textureIndex] = false;
             }
             // Stop iterating if we reach an entry that has been used in the present.
@@ -1172,7 +1180,7 @@ namespace RT64 {
                     if (replacementTexture != nullptr) {
                         // We don't use reference counting on preloaded textures or low mip cache versions, as they're permanently allocated in memory.
                         bool referenceCounted = (resolvedPath.resolvedOperation != ReplacementOperation::Preload) && (replacementTexture != lowMipCacheTexture);
-                        replacementMapAdditions.emplace_back(ReplacementMapAddition{ resolvedPath.textureHash, replacementTexture, resolvedPath.resolvedShift, referenceCounted });
+                        replacementMapAdditions.emplace_back(ReplacementMapAddition{ resolvedPath.textureHash, replacementTexture, resolvedPath.resolvedShift, resolvedPath.forceNearestFiltering, referenceCounted });
                     }
                 }
                 
@@ -1239,7 +1247,7 @@ namespace RT64 {
                     }
 
                     for (const ReplacementMapAddition &addition : replacementMapAdditions) {
-                        textureMap.replace(addition.hash, addition.texture, addition.shift == ReplacementShift::Half, addition.referenceCounted);
+                        textureMap.replace(addition.hash, addition.texture, addition.shift == ReplacementShift::Half, addition.forceNearestFiltering, addition.referenceCounted);
                     }
 
                     textureMap.replacementMap.evict(textureMap.evictedTextures);
@@ -1312,9 +1320,9 @@ namespace RT64 {
         }
     }
 
-    bool TextureCache::useTexture(uint64_t hash, uint64_t submissionFrame, uint32_t &textureIndex, interop::float2 &textureScale, interop::float3 &textureDimensions, bool &textureReplaced, bool &hasMipmaps, bool &shiftedByHalf) {
+    bool TextureCache::useTexture(uint64_t hash, uint64_t submissionFrame, uint32_t &textureIndex, interop::float2 &textureScale, interop::float3 &textureDimensions, bool &textureReplaced, bool &hasMipmaps, bool &shiftedByHalf, bool &forceNearestFiltering) {
         std::unique_lock lock(textureMapMutex);
-        return textureMap.use(hash, submissionFrame, textureIndex, textureScale, textureDimensions, textureReplaced, hasMipmaps, shiftedByHalf);
+        return textureMap.use(hash, submissionFrame, textureIndex, textureScale, textureDimensions, textureReplaced, hasMipmaps, shiftedByHalf, forceNearestFiltering);
     }
 
     bool TextureCache::useTexture(uint64_t hash, uint64_t submissionFrame, uint32_t &textureIndex) {
@@ -1323,7 +1331,8 @@ namespace RT64 {
         bool textureReplaced;
         bool hasMipmaps;
         bool shiftedByHalf;
-        return useTexture(hash, submissionFrame, textureIndex, textureScale, textureDimensions, textureReplaced, hasMipmaps, shiftedByHalf);
+        bool forceNearestFiltering;
+        return useTexture(hash, submissionFrame, textureIndex, textureScale, textureDimensions, textureReplaced, hasMipmaps, shiftedByHalf, forceNearestFiltering);
     }
     
     bool TextureCache::addReplacement(uint64_t hash, const std::string &relativePath, ReplacementShift shift) {
@@ -1373,7 +1382,7 @@ namespace RT64 {
         
         ReplacementOperation resolvedOperation = replacementDb.resolveOperation(replacement.path, replacement.operation);
         ReplacementShift resolvedShift = replacementDb.resolveShift(replacement.path, replacement.shift);
-        ReplacementResolvedPath resolvedPath = { 0, hash, relativePathForward, resolvedOperation, replacement.operation, resolvedShift, replacement.shift };
+        ReplacementResolvedPath resolvedPath = { 0, hash, relativePathForward, resolvedOperation, replacement.operation, resolvedShift, replacement.shift, replacementDb.config.forceNearestFiltering };
         textureMap.replacementMap.fileSystemResolvedPaths[0][hash] = resolvedPath;
 
         uploadQueueMutex.lock();

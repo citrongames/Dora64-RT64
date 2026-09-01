@@ -250,6 +250,7 @@ namespace RT64 {
                     gpuTile.flags.fromCopy = true;
                     gpuTile.flags.rawTMEM = false;
                     gpuTile.flags.hasMipmaps = false;
+                    gpuTile.flags.forceNearestFiltering = false;
                 }
             }
             else {
@@ -258,7 +259,8 @@ namespace RT64 {
                 bool textureReplaced = false;
                 bool hasMipmaps = false;
                 bool shiftedByHalf = false;
-                textureCache->useTexture(callTile.tmemHashOrID, submissionFrame, textureIndex, gpuTile.tcScale, gpuTile.textureDimensions, textureReplaced, hasMipmaps, shiftedByHalf);
+                bool forceNearestFiltering = false;
+                textureCache->useTexture(callTile.tmemHashOrID, submissionFrame, textureIndex, gpuTile.tcScale, gpuTile.textureDimensions, textureReplaced, hasMipmaps, shiftedByHalf, forceNearestFiltering);
 
                 // Describe the GPU tile for a regular texture.
                 gpuTile.ulScale.x = gpuTile.tcScale.x;
@@ -267,11 +269,14 @@ namespace RT64 {
                 gpuTile.texelMask = { UINT_MAX, UINT_MAX };
                 gpuTile.textureIndex = textureIndex;
                 gpuTile.flags.alphaIsCvg = false;
-                gpuTile.flags.highRes = textureReplaced;
+                // Pixel-art replacement packs must use the same native-resolution
+                // UV grid and low-precision coordinates as the original texture.
+                gpuTile.flags.highRes = textureReplaced && !forceNearestFiltering;
                 gpuTile.flags.fromCopy = false;
                 gpuTile.flags.rawTMEM = !textureReplaced && callTile.rawTMEM;
                 gpuTile.flags.hasMipmaps = hasMipmaps;
                 gpuTile.flags.shiftedByHalf = shiftedByHalf;
+                gpuTile.flags.forceNearestFiltering = forceNearestFiltering;
             }
         }
     }

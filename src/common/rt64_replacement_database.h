@@ -59,6 +59,7 @@ namespace RT64 {
         ReplacementAutoPath autoPath = ReplacementAutoPath::RT64;
         ReplacementOperation defaultOperation = ReplacementOperation::Stream;
         ReplacementShift defaultShift = ReplacementShift::Half;
+        bool forceNearestFiltering = false;
         uint32_t configurationVersion = 3;
         uint32_t hashVersion = 5;
     };
@@ -99,6 +100,7 @@ namespace RT64 {
         ReplacementOperation originalOperation = ReplacementOperation::Auto;
         ReplacementShift resolvedShift = ReplacementShift::Auto;
         ReplacementShift originalShift = ReplacementShift::Auto;
+        bool forceNearestFiltering = false;
     };
 
     struct ReplacementMipmapCacheHeader {

@@ -246,9 +246,10 @@ float4 sampleTexture(OtherMode otherMode, RenderFlags renderFlags, float2 inputU
     
     const uint filter = otherMode.textFilt();
     const uint cycleType = otherMode.cycleType();
-    const bool filterBilerp = (filter != G_TF_POINT) && (cycleType != G_CYC_COPY);
+    const bool forceNearestFiltering = gpuTileFlagForceNearestFiltering(gpuTile.flags);
+    const bool filterBilerp = !forceNearestFiltering && (filter != G_TF_POINT) && (cycleType != G_CYC_COPY);
     const bool filterAverage = (filter == G_TF_AVERAGE);
-    const bool linearFiltering = renderFlagLinearFiltering(renderFlags);
+    const bool linearFiltering = !forceNearestFiltering && renderFlagLinearFiltering(renderFlags);
     
 #if FIX_UPSCALING_PRECISION
     // Account for the fact that scaling can result in less than perfect results that affect the quality of point filtering.
@@ -263,7 +264,7 @@ float4 sampleTexture(OtherMode otherMode, RenderFlags renderFlags, float2 inputU
     const bool canDecodeTMEM = renderFlagCanDecodeTMEM(renderFlags);
     const bool usesHDR = renderFlagUsesHDR(renderFlags);
     const uint nativeSampler = rdpTile.nativeSampler;
-    const bool flagHasMipmaps = gpuTileFlagHasMipmaps(gpuTile.flags);
+    const bool flagHasMipmaps = !forceNearestFiltering && gpuTileFlagHasMipmaps(gpuTile.flags);
     uint numRDPSamples = 0;
     uint RDPMipLevels[2];
     RDPMipLevels[0] = 0;

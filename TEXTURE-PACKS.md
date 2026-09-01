@@ -35,7 +35,8 @@ The configuration file (`rt64.json`) follows this format:
         "configurationVersion": 3,
         "hashVersion": 5,
         "defaultOperation": "stream",
-        "defaultShift": "half"
+        "defaultShift": "half",
+        "forceNearestFiltering": false
     },
     "operationFilters": [
         {
@@ -86,6 +87,7 @@ The configuration file (`rt64.json`) follows this format:
 - **hashVersion**: The version of the hash algorithm used by RT64.
 - **defaultOperation**: Determines the default loading operation for all textures in the pack. See the ["Operation"](#operation) section for more details.
 - **defaultShift**: Determines the default texture shift behavior for all textures in the pack. See the ["Shift"](#shift) section for more details.
+- **forceNearestFiltering**: Optional. When true, replacement textures from this pack use the original native-resolution UV grid and bypass bilinear, three-point and mip filtering. This is intended for same-resolution pixel-art UI and text packs; the default is false.
 
 ### Filters
 
