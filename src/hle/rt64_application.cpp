@@ -577,6 +577,25 @@ namespace RT64 {
             }
         }
 
+        if (userConfig.developerMode && (message == WM_KEYDOWN)) {
+            switch (wParam) {
+            case VK_F1:
+                processDeveloperShortcut(DeveloperShortcut::Inspector);
+                return true;
+            case VK_F2:
+                processDeveloperShortcut(DeveloperShortcut::RayTracing);
+                return true;
+            case VK_F3:
+                processDeveloperShortcut(DeveloperShortcut::ViewRDRAM);
+                return true;
+            case VK_F4:
+                processDeveloperShortcut(DeveloperShortcut::Replacements);
+                return true;
+            default:
+                break;
+            }
+        }
+
         return false;
     }
 #endif
@@ -587,6 +606,25 @@ namespace RT64 {
             const std::lock_guard lock(presentQueue->inspectorMutex);
             if ((presentQueue->inspector != nullptr) && presentQueue->inspector->handleSdlEvent(event)) {
                 return true;
+            }
+        }
+
+        if (userConfig.developerMode && (event->type == SDL_KEYDOWN)) {
+            switch (event->key.keysym.scancode) {
+            case SDL_SCANCODE_F1:
+                processDeveloperShortcut(DeveloperShortcut::Inspector);
+                return true;
+            case SDL_SCANCODE_F2:
+                processDeveloperShortcut(DeveloperShortcut::RayTracing);
+                return true;
+            case SDL_SCANCODE_F3:
+                processDeveloperShortcut(DeveloperShortcut::ViewRDRAM);
+                return true;
+            case SDL_SCANCODE_F4:
+                processDeveloperShortcut(DeveloperShortcut::Replacements);
+                return true;
+            default:
+                break;
             }
         }
 
