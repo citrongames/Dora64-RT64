@@ -137,6 +137,7 @@ namespace RT64 {
         ~State();
         void setup(const External &ext);
         void reset();
+        void resetGameSession();
         void resetDrawCall();
         void updateDrawStatusAttribute(DrawAttribute attribute);
         bool checkDrawState();

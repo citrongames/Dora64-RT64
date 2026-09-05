@@ -95,6 +95,26 @@ namespace RT64 {
         resetDrawCall();
     }
 
+    void State::resetGameSession() {
+        // Keep the renderer queues, frame counters and host resources alive,
+        // but discard console-side graphics state that would be reset by a
+        // real N64 cold boot. In particular, stale TMEM replacement hashes or
+        // framebuffer-copy regions must not leak into the new game session.
+        rsp->reset();
+        rdp->resetGameSession();
+        resetDrawCall();
+        activeSpriteCommand.replacementHash = 0;
+        addLightsOnFlush = false;
+        drawFbOperations.clear();
+        drawFbDiscards.clear();
+        returnAddressStack.clear();
+        differentFbs.clear();
+        framebufferManager.activeRegionsTMEM.clear();
+        rdramCheckPending = true;
+        disableExtendedGBI();
+        clearExtended();
+    }
+
     void State::resetDrawCall() {
         drawStatus.reset();
         drawCall.uid = 0;

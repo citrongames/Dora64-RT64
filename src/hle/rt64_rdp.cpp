@@ -4,6 +4,7 @@
 
 #include "rt64_rdp.h"
 
+#include <algorithm>
 #include <cassert>
 
 #include "../include/rt64_extended_gbi.h"
@@ -106,6 +107,25 @@ namespace RT64 {
         pendingCommandRemainingBytes = 0;
 
         clearExtended();
+    }
+
+    void RDP::resetGameSession() {
+        memset(TMEM, 0, sizeof(TMEM));
+        texture = {};
+        std::fill(std::begin(tiles), std::end(tiles), LoadTile{});
+        std::fill(std::begin(tileReplacementHashes), std::end(tileReplacementHashes), uint64_t{});
+        colorImage = {};
+        depthImage = {};
+        rice = {};
+        pendingCommandBuffer.fill(0);
+        triPointerBuffer.clear();
+        triPosWorkBuffer.clear();
+        triColWorkBuffer.clear();
+        triTcWorkBuffer.clear();
+        regionIterators.clear();
+        crashed = false;
+        crashReason = CrashReason::None;
+        reset();
     }
 
     void RDP::crash(CrashReason reason) {

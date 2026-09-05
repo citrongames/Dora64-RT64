@@ -143,6 +143,7 @@ namespace RT64 {
         RDP(State *state);
         void setGBI();
         void reset();
+        void resetGameSession();
         void crash(CrashReason reason);
         void checkFramebufferPair();
         void checkFramebufferOverlap(uint32_t tmemStart, uint32_t tmemWords, uint32_t tmemMask, uint32_t addressStart, uint32_t addressEnd, uint32_t tileWidth, uint32_t tileHeight, bool RGBA32, bool makeTileCopy);

@@ -1791,9 +1791,12 @@ namespace RT64 {
                         // in and out. Its texture contents differ when the game
                         // returns to the intro after the ending. Widen both
                         // observed fade variants without stretching the three
-                        // centered rectangles that form the logo.
+                        // centered rectangles that form the logo. Do not tie
+                        // this to a projection index: after an in-process game
+                        // reset the persistent renderer can place the same fade
+                        // in a later rectangle projection.
                         const bool wideEpochFadeRectangle =
-                            widescreenRequested && (pr == 0) &&
+                            widescreenRequested &&
                             (proj.type == Projection::Type::Rectangle) &&
                             rectangleCoversCallScissor &&
                             ((rectangleTextureHash == 0x764DFAD2DE1CCFF8ULL) ||
