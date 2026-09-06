@@ -931,7 +931,10 @@ namespace RT64 {
     void RSP::setLight(uint8_t index, uint32_t address) {
         assert((index >= 0) && (index <= RSP_MAX_LIGHTS));
         const uint32_t rdramAddress = fromSegmentedMasked(address);
-        const uint8_t *data = reinterpret_cast<const uint8_t *>(state->fromRDRAM(rdramAddress));
+        const void *data = lightDataCallback != nullptr ? lightDataCallback(rdramAddress) : nullptr;
+        if (data == nullptr) {
+            data = state->fromRDRAM(rdramAddress);
+        }
         memcpy(&lights[index], data, sizeof(Light));
         lightsChanged = true;
     }

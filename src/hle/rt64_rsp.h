@@ -162,6 +162,9 @@ namespace RT64 {
         std::bitset<RSP_MAX_VERTICES> used;
         std::array<Light, RSP_MAX_LIGHTS + 1> lights;
         int lightCount;
+        // Optional immutable memory source supplied by a native game port.
+        // Returning nullptr retains the default RDRAM read.
+        const void* (*lightDataCallback)(uint32_t) = nullptr;
         uint32_t vertexFogIndex;
         uint32_t vertexLightIndex;
         uint32_t vertexLightCount;
