@@ -7,6 +7,7 @@
 #include "shared/rt64_raster_params.h"
 
 #include "Depth.hlsli"
+#include "DepthDelta.hlsli"
 #include "FbRendererCommon.hlsli"
 #include "Library.hlsli"
 #include "Random.hlsli"
@@ -44,6 +45,30 @@ float sampleBackgroundDepth(int2 pixelPos, uint sampleCount) {
     return gBackgroundDepth.Load(int3(pixelPos, 0));
 }
 #endif
+
+// Estimate the surface dz only for decal comparisons. Clamp the neighborhood
+// to the actual depth target; repeated border samples conservatively give zero.
+float surfaceDepthDelta(int2 pixelPos, float surfaceDepth, uint sampleCount) {
+    uint width, height;
+#if defined(MULTISAMPLING)
+    uint depthSamples;
+    gBackgroundDepth.GetDimensions(width, height, depthSamples);
+#else
+    gBackgroundDepth.GetDimensions(width, height);
+#endif
+    const int2 lastPixel = int2(width, height) - 1;
+    const float left1 = sampleBackgroundDepth(clamp(pixelPos + int2(-1, 0), int2(0, 0), lastPixel), sampleCount);
+    const float left2 = sampleBackgroundDepth(clamp(pixelPos + int2(-2, 0), int2(0, 0), lastPixel), sampleCount);
+    const float right1 = sampleBackgroundDepth(clamp(pixelPos + int2(1, 0), int2(0, 0), lastPixel), sampleCount);
+    const float right2 = sampleBackgroundDepth(clamp(pixelPos + int2(2, 0), int2(0, 0), lastPixel), sampleCount);
+    const float up1 = sampleBackgroundDepth(clamp(pixelPos + int2(0, -1), int2(0, 0), lastPixel), sampleCount);
+    const float up2 = sampleBackgroundDepth(clamp(pixelPos + int2(0, -2), int2(0, 0), lastPixel), sampleCount);
+    const float down1 = sampleBackgroundDepth(clamp(pixelPos + int2(0, 1), int2(0, 0), lastPixel), sampleCount);
+    const float down2 = sampleBackgroundDepth(clamp(pixelPos + int2(0, 2), int2(0, 0), lastPixel), sampleCount);
+    return RasterDepthDelta(
+        RasterSurfaceDepthDerivative(surfaceDepth, left1, left2, right1, right2) * FbParams.resolutionScale.y,
+        RasterSurfaceDepthDerivative(surfaceDepth, up1, up2, down1, down2) * FbParams.resolutionScale.y);
+}
 
 LIBRARY_EXPORT bool RasterPS(const RenderParams rp, float4 vertexPosition, float2 vertexUV, float4 vertexSmoothColor, float4 vertexFlatColor,
     bool isFrontFace, out float4 resultColor, out float4 resultAlpha) 
@@ -100,11 +125,15 @@ LIBRARY_EXPORT bool RasterPS(const RenderParams rp, float4 vertexPosition, float
             dz = instanceRDPParams[instanceIndex].primDepth.y;
         }
         else {
-            dz = (abs(ddx(vertexPosition.z)) + abs(ddy(vertexPosition.z))) * FbParams.resolutionScale.y;
+            dz = RasterDepthDelta(ddx(vertexPosition.z) * FbParams.resolutionScale.y,
+                ddy(vertexPosition.z) * FbParams.resolutionScale.y);
         }
 
         // Perform the decal depth tolerance check.
-        const float DepthTolerance = max(CoplanarDepthTolerance(surfaceDepth), dz);
+        const float surfaceDz = surfaceDepthDelta(pixelPos, surfaceDepth, sampleCount);
+        const uint depthExponent = ExponentFromFixedDepth(FloatToFixedDepth(surfaceDepth));
+        const float DepthTolerance = max(CoplanarDepthTolerance(surfaceDepth),
+            RasterDecalDepthTolerance(dz, surfaceDz, depthExponent));
         const float pixelDepth = select(depthClampNear, max(vertexPosition.z, 0.0f), vertexPosition.z);
         if (abs(pixelDepth - surfaceDepth) > DepthTolerance) {
             return false;

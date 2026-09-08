@@ -114,9 +114,13 @@ set (DXC_GS_OPTS "${DXC_COMMON_OPTS}" "-E" "GSMain" "-T gs_6_3")
 set (DXC_RT_OPTS "${DXC_COMMON_OPTS}" "-D" "RT_SHADER" "-T" "lib_6_3" "-fspv-target-env=vulkan1.1spirv1.4" "-fspv-extension=SPV_KHR_ray_tracing" "-fspv-extension=SPV_EXT_descriptor_indexing")
 
 function(build_shader_spirv_impl TARGETOBJ FILENAME TARGET_NAME OUTNAME)
+    set(SHADER_INCLUDE_DEPS)
+    if (FILENAME MATCHES "RasterPS[.]hlsl$")
+        list(APPEND SHADER_INCLUDE_DEPS "${PROJECT_SOURCE_DIR}/src/shaders/DepthDelta.hlsli")
+    endif()
     add_custom_command(OUTPUT ${OUTNAME}.spv
         COMMAND ${DXC} ${DXC_SPV_OPTS} ${ARGN} ${FILENAME} /Fo ${OUTNAME}.spv
-        DEPENDS ${FILENAME})
+        DEPENDS ${FILENAME} ${SHADER_INCLUDE_DEPS})
     add_custom_command(OUTPUT ${OUTNAME}.spirv.c
         COMMAND file_to_c ${OUTNAME}.spv ${TARGET_NAME}BlobSPIRV ${OUTNAME}.spirv.c ${OUTNAME}.spirv.h
         DEPENDS ${OUTNAME}.spv file_to_c
@@ -125,9 +129,13 @@ function(build_shader_spirv_impl TARGETOBJ FILENAME TARGET_NAME OUTNAME)
 endfunction()
 
 function(build_shader_dxil_impl TARGETOBJ FILENAME TARGET_NAME OUTNAME)
+    set(SHADER_INCLUDE_DEPS)
+    if (FILENAME MATCHES "RasterPS[.]hlsl$")
+        list(APPEND SHADER_INCLUDE_DEPS "${PROJECT_SOURCE_DIR}/src/shaders/DepthDelta.hlsli")
+    endif()
     add_custom_command(OUTPUT ${OUTNAME}.dxil
         COMMAND ${DXC} ${DXC_DXIL_OPTS} ${ARGN} ${FILENAME} /Fo ${OUTNAME}.dxil
-        DEPENDS ${FILENAME})
+        DEPENDS ${FILENAME} ${SHADER_INCLUDE_DEPS})
     add_custom_command(OUTPUT ${OUTNAME}.dxil.c
         COMMAND file_to_c ${OUTNAME}.dxil ${TARGET_NAME}BlobDXIL ${OUTNAME}.dxil.c ${OUTNAME}.dxil.h
         DEPENDS ${OUTNAME}.dxil file_to_c
@@ -136,9 +144,13 @@ function(build_shader_dxil_impl TARGETOBJ FILENAME TARGET_NAME OUTNAME)
 endfunction()
 
 function(build_shader_msl_impl TARGETOBJ FILENAME TARGET_NAME OUTNAME)
+    set(SHADER_INCLUDE_DEPS)
+    if (FILENAME MATCHES "RasterPS[.]hlsl$")
+        list(APPEND SHADER_INCLUDE_DEPS "${PROJECT_SOURCE_DIR}/src/shaders/DepthDelta.hlsli")
+    endif()
     add_custom_command(OUTPUT ${OUTNAME}.spv
             COMMAND ${DXC} ${DXC_SPV_OPTS} ${ARGN} ${FILENAME} /Fo ${OUTNAME}.spv
-            DEPENDS ${FILENAME})
+            DEPENDS ${FILENAME} ${SHADER_INCLUDE_DEPS})
     add_custom_command(OUTPUT ${OUTNAME}.metal
             COMMAND spirv_cross_msl ${OUTNAME}.spv ${OUTNAME}.metal
             DEPENDS ${OUTNAME}.spv spirv_cross_msl)
