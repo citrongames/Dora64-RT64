@@ -15,6 +15,8 @@
 
 #include "rt64_descriptor_sets.h"
 #include "rt64_render_worker.h"
+#include "rt64_menu_background.h"
+#include "rt64_screen_transition.h"
 
 // TODO: Move to shared.
 
@@ -505,11 +507,24 @@ namespace RT64 {
         };
 
         auto drawCallTriangles = [&](const InstanceDrawCall &drawCall) {
-            if (drawCall.type == InstanceDrawCall::Type::IndexedTriangles) {
-                worker->commandList->drawIndexedInstanced(drawCall.triangles.faceCount * 3, 1, drawCall.triangles.indexStart, 0, 0);
-            }
-            else {
-                worker->commandList->drawInstanced(drawCall.triangles.faceCount * 3, 1, drawCall.triangles.indexStart, 0);
+            const auto &triangles = drawCall.triangles;
+            for (int32_t repeat = triangles.horizontalRepeatFirst; repeat <= triangles.horizontalRepeatLast; repeat++) {
+                interop::RasterParams repeatedParams = rasterParams;
+                if (triangles.horizontalRepeatStep > 0.0f) {
+                    const float width = framebuffer.viewport.width;
+                    const auto placement = MenuBackground::placeRepeat(
+                        triangles.horizontalRepeatLeft, triangles.horizontalRepeatRight,
+                        triangles.horizontalRepeatStep, triangles.horizontalRepeatScale, width * 0.5f, repeat);
+                    repeatedParams.screenScale.x = (placement.right - placement.left) / width;
+                    repeatedParams.screenOffset.x = (1.0f + placement.left + placement.right - width) / width;
+                }
+                worker->commandList->setGraphicsPushConstants(0, &repeatedParams);
+                if (drawCall.type == InstanceDrawCall::Type::IndexedTriangles) {
+                    worker->commandList->drawIndexedInstanced(triangles.faceCount * 3, 1, triangles.indexStart, 0, 0);
+                }
+                else {
+                    worker->commandList->drawInstanced(triangles.faceCount * 3, 1, triangles.indexStart, 0);
+                }
             }
         };
 
@@ -579,7 +594,6 @@ namespace RT64 {
                 rasterParams.renderIndex = i;
                 rasterParams.screenScale = triangles.screenScale;
                 rasterParams.screenOffset = triangles.screenOffset;
-                worker->commandList->setGraphicsPushConstants(0, &rasterParams);
 
                 drawCallTriangles(drawCall);
 
@@ -1514,6 +1528,43 @@ namespace RT64 {
                 }
             }
 
+            // Recognize the complete menu mosaic, independently of its palette.
+            // Only the leading background calls qualify, never later menu art.
+            std::array<MenuBackground::Tile, MenuBackground::TileCount> menuTiles{};
+            std::array<uint32_t, MenuBackground::TileCount> menuTileCalls{};
+            uint32_t menuTileCount = 0;
+            FixedRect menuScissor;
+            if (widescreenRequested && (proj.type == Projection::Type::Rectangle) &&
+                (p.fbStorage->colorTarget != nullptr)) {
+                for (uint32_t candidateIndex = 0; (candidateIndex < proj.gameCallCount) &&
+                    (menuTileCount < MenuBackground::TileCount); candidateIndex++) {
+                    const GameCall &candidate = proj.gameCalls[candidateIndex];
+                    const auto &desc = candidate.callDesc;
+                    if (desc.otherMode.cycleType() == G_CYC_FILL) {
+                        // A clear between tiles is not part of the same mosaic.
+                        if (menuTileCount != 0) break;
+                        continue;
+                    }
+                    if ((desc.extendedType != DrawExtendedType::None) || (desc.tileCount != 1) ||
+                        desc.otherMode.zCmp() || desc.otherMode.zUpd() ||
+                        (desc.rectLeftOrigin != G_EX_ORIGIN_NONE) || (desc.rectRightOrigin != G_EX_ORIGIN_NONE) ||
+                        (desc.scissorLeftOrigin != G_EX_ORIGIN_NONE) || (desc.scissorRightOrigin != G_EX_ORIGIN_NONE)) {
+                        break;
+                    }
+                    const auto &tile = drawData.callTiles[desc.tileIndex];
+                    if (tile.tileCopyUsed) break;
+                    if (menuTileCount == 0) menuScissor = desc.scissorRect;
+                    if ((desc.scissorRect.ulx != menuScissor.ulx) || (desc.scissorRect.uly != menuScissor.uly) ||
+                        (desc.scissorRect.lrx != menuScissor.lrx) || (desc.scissorRect.lry != menuScissor.lry)) {
+                        break;
+                    }
+                    menuTileCalls[menuTileCount] = candidateIndex;
+                    menuTiles[menuTileCount++] = { desc.rect.ulx, desc.rect.uly, desc.rect.lrx, desc.rect.lry, tile.tmemHashOrID };
+                }
+            }
+            const bool wideMenuBackground = (menuTileCount == MenuBackground::TileCount) &&
+                MenuBackground::matches(menuTiles, menuScissor.ulx, menuScissor.uly, menuScissor.lrx, menuScissor.lry);
+
             uint32_t regularRectangleCount = 0;
             FixedRect regularRectangleBounds;
             bool hasRegularRectangleBounds = false;
@@ -1614,6 +1665,13 @@ namespace RT64 {
 
             for (uint32_t d = 0; (d < proj.gameCallCount) && (globalCallIndex < p.maxGameCall); d++) {
                 const GameCall &call = proj.gameCalls[d];
+                triangles.horizontalRepeatFirst = 0;
+                triangles.horizontalRepeatLast = 0;
+                triangles.horizontalRepeatStep = 0.0f;
+                const auto menuTile = std::find(menuTileCalls.begin(), menuTileCalls.end(), d);
+                const bool repeatMenuTile = wideMenuBackground && (menuTile != menuTileCalls.end());
+                const bool menuRepeatSource = repeatMenuTile &&
+                    MenuBackground::isRepeatSource(int(menuTile - menuTileCalls.begin()));
                 renderIndices.instanceIndex = call.callDesc.callIndex;
                 renderIndices.faceIndicesStart = call.meshDesc.faceIndicesStart;
                 renderIndices.rdpTileIndex = call.callDesc.tileIndex;
@@ -1801,6 +1859,24 @@ namespace RT64 {
                             rectangleCoversCallScissor &&
                             ((rectangleTextureHash == 0x764DFAD2DE1CCFF8ULL) ||
                              (rectangleTextureHash == 0xA7885397FC5FAD93ULL));
+                        // The same final overlay is used before gameplay and
+                        // inside menus. Its texture hash changes with the scene,
+                        // and a pure 2D menu has no preceding 3D projection.
+                        const auto &transitionDesc = call.callDesc;
+                        const bool wideTransitionRectangle =
+                            widescreenRequested && (proj.type == Projection::Type::Rectangle) &&
+                            (d + 1 == proj.gameCallCount) && regularRectangleOrigins &&
+                            (transitionDesc.scissorLeftOrigin == G_EX_ORIGIN_NONE) &&
+                            (transitionDesc.scissorRightOrigin == G_EX_ORIGIN_NONE) &&
+                            (transitionDesc.tileCount == 1) &&
+                            (transitionDesc.otherMode.cycleType() == G_CYC_1CYCLE) &&
+                            !transitionDesc.otherMode.zCmp() && !transitionDesc.otherMode.zUpd() &&
+                            ScreenTransition::matches(transitionDesc.rect.ulx, transitionDesc.rect.uly,
+                                transitionDesc.rect.lrx, transitionDesc.rect.lry,
+                                transitionDesc.scissorRect.ulx, transitionDesc.scissorRect.lrx,
+                                transitionDesc.colorCombiner.L, transitionDesc.colorCombiner.H);
+                        const bool wideOverlayRectangle =
+                            wideScreenEffectRectangle || wideEpochFadeRectangle || wideTransitionRectangle;
                         // Doraemon's gameplay HUD is emitted as compact regular
                         // rectangles in the four corners after the 3D scene. Move
                         // those rectangles by exactly the widescreen side margin,
@@ -1894,19 +1970,38 @@ namespace RT64 {
                                 horizontalMisalignment = 0.0f;
                             }
 
-                            if (wideScreenEffectRectangle || wideEpochFadeRectangle) {
+                            if (wideOverlayRectangle) {
                                 invRatioScale = 1.0f;
                                 horizontalMisalignment = 0.0f;
                             }
 
                             RenderViewport viewportRect = convertViewportRect(call.callDesc.rect, p.resolutionScale, p.fbWidth, invRatioScale, extOriginPercentage, horizontalMisalignment, call.callDesc.rectLeftOrigin, call.callDesc.rectRightOrigin);
-                            if (wideScreenEffectRectangle || wideEpochFadeRectangle) {
+                            if (wideOverlayRectangle) {
                                 viewportRect.x = 0.0f;
                                 viewportRect.width = wideWidth;
                             }
                             else if (fitGameplayHudRectangle) {
                                 viewportRect.x += gameplayHudHorizontalDirection *
                                     (middleViewport + gameplayHudSafeAreaInset);
+                            }
+
+                            if (repeatMenuTile) {
+                                // Repeat each half of the first complete 96-pixel
+                                // motif. The last source column can already be
+                                // clipped by one pixel, so repeating all three
+                                // columns would introduce a seam every 288 pixels.
+                                const float scale = p.resolutionScale.x * invRatioScale;
+                                triangles.horizontalRepeatLeft = call.callDesc.rect.left(true) - float(p.fbWidth) * 0.5f;
+                                triangles.horizontalRepeatRight = call.callDesc.rect.right(true) - float(p.fbWidth) * 0.5f;
+                                triangles.horizontalRepeatScale = scale;
+                                const float left = wideWidth * 0.5f + triangles.horizontalRepeatLeft * scale;
+                                const float width = (triangles.horizontalRepeatRight - triangles.horizontalRepeatLeft) * scale;
+                                const auto repeats = MenuBackground::visibleRepeats(
+                                    left, width, MenuBackground::RepeatWidth * scale, wideWidth);
+                                triangles.horizontalRepeatFirst = repeats.first;
+                                // Other columns are covered by copies of the first.
+                                triangles.horizontalRepeatLast = menuRepeatSource ? repeats.last : repeats.first - 1;
+                                triangles.horizontalRepeatStep = float(MenuBackground::RepeatWidth);
                             }
 
                             triangles.screenScale = { viewportRect.width / framebuffer.viewport.width, viewportRect.height / framebuffer.viewport.height };
@@ -1944,7 +2039,12 @@ namespace RT64 {
                             triangles.scissor.right = lround(wideWidth);
                         }
 
-                        if (wideScreenEffectRectangle || wideEpochFadeRectangle) {
+                        if (repeatMenuTile) {
+                            triangles.scissor.left = 0;
+                            triangles.scissor.right = lround(wideWidth);
+                        }
+
+                        if (wideOverlayRectangle) {
                             triangles.scissor.left = 0;
                             triangles.scissor.right = lround(wideWidth);
                         }

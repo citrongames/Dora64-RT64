@@ -36,6 +36,12 @@ namespace RT64 {
                 interop::float2 screenScale;
                 interop::float2 screenOffset;
                 RenderRect scissor;
+                int32_t horizontalRepeatFirst;
+                int32_t horizontalRepeatLast;
+                float horizontalRepeatStep;
+                float horizontalRepeatLeft;
+                float horizontalRepeatRight;
+                float horizontalRepeatScale;
                 uint32_t indexStart;
                 uint32_t faceCount;
                 bool vertexTestZ : 1;
