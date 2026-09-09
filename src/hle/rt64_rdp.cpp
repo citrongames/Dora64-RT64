@@ -1201,7 +1201,10 @@ namespace RT64 {
         // for widescreen hacks, an enhancement option to fix them is available given they're within the
         // tolerance of one pixel from the scissor coordinates.
         const FixedRect &scissorRect = state->rdp->scissorRectStack[scissorStackSize - 1];
-        const bool fixRectLR = state->ext.enhancementConfig->rect.fixRectLR;
+        // Explicitly sized native panorama tiles must meet at their original
+        // edges, even where an edge happens to touch the old 4:3 scissor.
+        const bool fixRectLR = state->ext.enhancementConfig->rect.fixRectLR &&
+            (extended.global.rectAspect != G_EX_ASPECT_ADJUST);
         if (!scissorRect.isNull() && fixRectLR) {
             if ((abs(scissorRect.lrx - lrx) <= 4) && (ulx < scissorRect.lrx)) {
                 lrx = scissorRect.lrx;
@@ -1311,7 +1314,10 @@ namespace RT64 {
 
         // Update the tracked texcoords for the used tiles. Use scissor intersection to figure out 
         // what the bounds of the real sampling will be if necessary.
-        const bool computeIntersection = !scissorRect.isNull() && !scissorRect.fullyInside(drawRect);
+        // Panorama tiles are later displayed outside the original scissor.
+        // Track their full texture footprint, including tiles wholly offscreen in 4:3.
+        const bool computeIntersection = (extended.global.rectAspect != G_EX_ASPECT_ADJUST) &&
+            !scissorRect.isNull() && !scissorRect.fullyInside(drawRect);
         if (computeIntersection) {
             const FixedRect intersectionRect = scissorRect.intersection(drawRect);
             if (!intersectionRect.isNull()) {

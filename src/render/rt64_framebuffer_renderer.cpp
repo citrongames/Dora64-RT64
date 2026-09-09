@@ -1820,6 +1820,9 @@ namespace RT64 {
                         const bool regularRectangleOrigins =
                             (call.callDesc.rectLeftOrigin == G_EX_ORIGIN_NONE) &&
                             (call.callDesc.rectRightOrigin == G_EX_ORIGIN_NONE);
+                        // Native sky sectors explicitly request their original pixel scale.
+                        const bool panoramaRectangle = (proj.type == Projection::Type::Rectangle) &&
+                            regularRectangleOrigins && (call.callDesc.rectAspect == G_EX_ASPECT_ADJUST);
                         const bool rectangleCoversProjection =
                             regularRectangleOrigins &&
                             (call.callDesc.rect.ulx <= proj.scissorRect.ulx) &&
@@ -1965,13 +1968,21 @@ namespace RT64 {
                                 horizontalMisalignment = p.horizontalMisalignment;
                             }
 
-                            if (wideBackgroundProjection) {
+                            if (wideBackgroundProjection && !panoramaRectangle) {
                                 invRatioScale = 1.0f;
                                 horizontalMisalignment = 0.0f;
                             }
 
                             if (wideOverlayRectangle) {
                                 invRatioScale = 1.0f;
+                                horizontalMisalignment = 0.0f;
+                            }
+
+                            if (panoramaRectangle) {
+                                // Explicit native-scale sectors must not use adjustRatio:
+                                // letterboxed cutscenes change the framebuffer scissor
+                                // when dialogue appears, but the sky scale stays constant.
+                                invRatioScale = p.aspectRatioSource / p.aspectRatioTarget;
                                 horizontalMisalignment = 0.0f;
                             }
 
@@ -2039,7 +2050,7 @@ namespace RT64 {
                             triangles.scissor.right = lround(wideWidth);
                         }
 
-                        if (repeatMenuTile) {
+                        if (repeatMenuTile || (widescreenRequested && panoramaRectangle)) {
                             triangles.scissor.left = 0;
                             triangles.scissor.right = lround(wideWidth);
                         }
