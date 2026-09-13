@@ -887,7 +887,6 @@ namespace RT64 {
         uint32_t originalRateForTicks = 0;
         uint32_t displayRateForTicks = 0;
         int processCursor = -1;
-        bool frameReduction = false;
         while (threadsRunning) {
             {
                 std::unique_lock<std::mutex> cursorLock(cursorMutex);
@@ -1004,12 +1003,6 @@ namespace RT64 {
                     displayFrames = uint32_t((logicalTicks - displayTicks) / workload.viOriginalRate);
                     deltaTimeMs = 1.0f / float(workloadConfig.targetRate);
 
-                    if ((displayFrames > 1) && frameReduction) {
-                        displayTicks += workload.viOriginalRate;
-                        displayFrames--;
-                        frameReduction = false;
-                    }
-
                     assert((logicalTicks > displayTicks) && "Logical ticks must always remain bigger than the display ticks.");
                     assert(((logicalTicks - displayTicks) <= (workloadConfig.targetRate + workload.viOriginalRate)) && "The gap between logical ticks and display ticks can't be bigger than the target rate.");
                     assert((displayFrames > 0) && "At least one display frame must be generated.");
@@ -1091,9 +1084,12 @@ namespace RT64 {
 
                             if (useDifferentCounters && (prevFrameCounters.available > 0) && (targetIndex < prevFrameCounters.available)) {
                                 // Wait until the target has finished presenting if the alternate frame counter (used by the present queue) is making use of this target.
+                                // This is normal backpressure from paced presentation, especially when the
+                                // display rate is not a multiple of the source rate (e.g. 144 / 60).
+                                // Do not drop a future frame just because this wait was needed. The
+                                // elapsed-time and pending-workload checks already handle actual overload.
                                 std::unique_lock<std::mutex> interpolatedLock(ext.sharedResources->interpolatedMutex);
                                 ext.sharedResources->interpolatedCondition.wait(interpolatedLock, [&]() {
-                                    frameReduction = frameReduction || (prevFrameCounters.presented <= targetIndex);
                                     return prevFrameCounters.presented > targetIndex;
                                 });
                             }
