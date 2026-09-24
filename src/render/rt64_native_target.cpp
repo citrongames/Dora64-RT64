@@ -3,6 +3,7 @@
 //
 
 #include <cstring>
+#include <cstdio>
 
 #include "rt64_native_target.h"
 
@@ -89,6 +90,15 @@ namespace RT64 {
         // Copy to the native upload resource.
         const bool hasCurrentResource = !invalidateTargets && (readBufferHistoryCount > 0);
         const uint32_t bufferSize = getNativeSize(width, height, siz);
+        if (bufferSize == 0) {
+            // Vulkan rejects a zero-byte VkBuffer. There are no framebuffer
+            // pixels to compare or upload for this region.
+            std::fprintf(stderr,
+                "RT64 skipped empty framebuffer RAM upload: width=%u height=%u rowStart=%u siz=%u fmt=%u history=%u\n",
+                width, height, rowStart, siz, fmt, readBufferHistoryCount);
+            std::fflush(stderr);
+            return 0;
+        }
         while (readBufferHistoryCount >= readBufferHistory.size()) {
             readBufferHistory.emplace_back();
         }

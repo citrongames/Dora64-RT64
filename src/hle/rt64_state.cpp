@@ -2875,6 +2875,10 @@ namespace RT64 {
     }
 
     uint8_t *State::fromRDRAM(uint32_t rdramAddress) const {
+        if (displayListSnapshot != nullptr && rdramAddress >= displayListSnapshotBegin &&
+            rdramAddress < displayListSnapshotEnd) {
+            return const_cast<uint8_t *>(displayListSnapshot + rdramAddress - displayListSnapshotBegin);
+        }
         return &RDRAM[rdramAddress];
     }
 

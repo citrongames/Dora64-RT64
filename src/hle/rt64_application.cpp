@@ -489,7 +489,8 @@ namespace RT64 {
 #   endif
 
             ElapsedTimer displayListTimer;
-            DisplayList *dlStart = reinterpret_cast<DisplayList *>(&memory[dlStartAddress]);
+            DisplayList *dlStart = reinterpret_cast<DisplayList *>(
+                isHLE ? state->fromRDRAM(dlStartAddress) : &memory[dlStartAddress]);
             DisplayList *dlEnd = (dlEndAddress > 0) ? reinterpret_cast<RT64::DisplayList *>(&memory[dlEndAddress]) : nullptr;
 
 #       if SCRIPT_ENABLED
