@@ -7,6 +7,14 @@
 #include <cassert>
 #include <cinttypes>
 
+#if defined(__ANDROID__) && !defined(NDEBUG)
+#include <atomic>
+#include <unistd.h>
+#define DORA64_FS_TRACE(phase) trace(phase)
+#else
+#define DORA64_FS_TRACE(phase) ((void)0)
+#endif
+
 #include "im3d/im3d.h"
 #include "im3d/im3d_math.h"
 #include "imgui/imgui.h"
@@ -810,8 +818,21 @@ namespace RT64 {
     }
 
     void State::fullSync() {
+#if defined(__ANDROID__) && !defined(NDEBUG)
+        static std::atomic<unsigned> traceCount{0};
+        const bool traceEnabled = traceCount.fetch_add(1, std::memory_order_relaxed) < 4;
+        const auto trace = [traceEnabled](const char *phase) {
+            if (traceEnabled && GlobalLogFile != nullptr) {
+                RT64_LOG_PRINTF("Dora64 fullSync: %s", phase);
+                fsync(fileno(GlobalLogFile));
+            }
+        };
+#endif
+        DORA64_FS_TRACE("enter");
         flush();
+        DORA64_FS_TRACE("after flush");
         submitFramebufferPair(FramebufferPair::FlushReason::ProcessDisplayListsEnd);
+        DORA64_FS_TRACE("after submitFramebufferPair");
 
         // Append any framebuffer operations to the end of the last framebuffer pair.
         int workloadCursor = ext.workloadQueue->writeCursor;
@@ -1145,8 +1166,11 @@ namespace RT64 {
 
         // Start uploading the entire draw data for all the framebuffer pairs that were processed.
         workload.updateDrawDataRanges();
+        DORA64_FS_TRACE("before uploadDrawData");
         workload.uploadDrawData(ext.framebufferGraphicsWorker, ext.drawDataUploader);
+        DORA64_FS_TRACE("after uploadDrawData");
         workload.updateOutputBuffers(ext.framebufferGraphicsWorker);
+        DORA64_FS_TRACE("after updateOutputBuffers");
 
         // Upload the transforms directly.
         ext.transformsUploader->submit(ext.framebufferGraphicsWorker, {
@@ -1174,9 +1198,12 @@ namespace RT64 {
 
         // Make sure pipelines for the ubershader have been created before rendering. This condition is executed regardless
         // of whether rendering to RAM is active so the workload queue is guaranteed to have the pipelines ready as well.
+        DORA64_FS_TRACE("before shaderUber wait");
         ext.rasterShaderCache->shaderUber->waitForPipelineCreation();
+        DORA64_FS_TRACE("after shaderUber wait");
 
         if (renderToRDRAM) {
+            DORA64_FS_TRACE("renderToRDRAM branch");
             const hlslpp::float2 resolutionScale(1.0f, 1.0f);
             RT64::Framebuffer *colorFb = nullptr;
             RT64::Framebuffer *depthFb = nullptr;
@@ -1256,11 +1283,13 @@ namespace RT64 {
 
             uint32_t framebufferIndex = 0;
             auto renderSetup = [&]() {
+                DORA64_FS_TRACE("renderSetup begin");
                 scratchFbChangePool.reset();
                 ext.framebufferGraphicsWorker->commandList->begin();
                 framebufferManager.resetOperations();
                 framebufferRenderer->resetFramebuffers(ext.framebufferGraphicsWorker, false, workload.extended.ditherNoiseStrength, renderTargetManager.multisampling);
                 framebufferIndex = 0;
+                DORA64_FS_TRACE("renderSetup end");
             };
 
             thread_local std::unordered_set<RenderTarget *> resizedTargets;
@@ -1284,6 +1313,7 @@ namespace RT64 {
             };
 
             auto renderAndSynchronize = [&](uint32_t maxFramebufferPair) {
+                DORA64_FS_TRACE("renderAndSynchronize begin");
                 // Preprocess all the framebuffer operations.
                 uint32_t pairCursor = framebufferPairCursor;
                 while (pairCursor < maxFramebufferPair) {
@@ -1330,8 +1360,11 @@ namespace RT64 {
                 }
 
                 // Synchronize all texture uploads before filling out the GPU tiles and update the texture cache on the framebuffer renderer.
+                DORA64_FS_TRACE("before texture GPU upload wait");
                 ext.textureCache->waitForGPUUploads();
+                DORA64_FS_TRACE("before updateTextureCache");
                 framebufferRenderer->updateTextureCache(ext.textureCache);
+                DORA64_FS_TRACE("after updateTextureCache");
 
                 thread_local std::vector<BufferUploader *> bufferUploaders;
                 bufferUploaders.clear();
@@ -1366,8 +1399,10 @@ namespace RT64 {
                 }
 
                 // Record all setup previous to drawing any of the recorded framebuffers.
+                DORA64_FS_TRACE("before recordSetup");
                 framebufferRenderer->endFramebuffers(ext.framebufferGraphicsWorker, &workload.drawBuffers, &workload.outputBuffers, false);
                 framebufferRenderer->recordSetup(ext.framebufferGraphicsWorker, bufferUploaders, queuedProcessor, nullptr, &workload.outputBuffers, false);
+                DORA64_FS_TRACE("after recordSetup");
 
                 // Record the command list for the framebuffer pairs.
                 pairCursor = framebufferPairCursor;
@@ -1488,10 +1523,15 @@ namespace RT64 {
                     pairCursor++;
                 }
 
+                DORA64_FS_TRACE("before render commandList end");
                 ext.framebufferGraphicsWorker->commandList->end();
+                DORA64_FS_TRACE("before render uploaders wait");
                 framebufferRenderer->waitForUploaders();
+                DORA64_FS_TRACE("before render GPU execute");
                 ext.framebufferGraphicsWorker->execute();
+                DORA64_FS_TRACE("before render GPU wait");
                 ext.framebufferGraphicsWorker->wait();
+                DORA64_FS_TRACE("after render GPU wait");
 
                 pairCursor = framebufferPairCursor;
                 while (pairCursor < maxFramebufferPair) {
@@ -1553,7 +1593,9 @@ namespace RT64 {
                 }
             }
 
+            DORA64_FS_TRACE("before initial render target safety");
             checkRenderTargetSafety(true);
+            DORA64_FS_TRACE("after initial render target safety");
 
             // Indicate to the texture cache the textures must not be deleted.
             ext.textureCache->incrementLock();
@@ -1581,9 +1623,12 @@ namespace RT64 {
             }
 
             // Render any remaining batches of framebuffers.
+            DORA64_FS_TRACE("before final renderAndSynchronize");
             renderAndSynchronize(workload.fbPairCount);
+            DORA64_FS_TRACE("after final renderAndSynchronize");
         }
         else {
+            DORA64_FS_TRACE("non-renderToRDRAM branch");
             // Process all tiles.
             for (uint32_t f = 0; f < workload.fbPairCount; f++) {
                 fullSyncFramebufferPairTiles(workload, workload.fbPairs[f], loadOpCursor, rdpTileCursor);
@@ -1598,11 +1643,17 @@ namespace RT64 {
             ext.drawDataUploader->commandListAfterBarriers(ext.framebufferGraphicsWorker);
             ext.transformsUploader->commandListAfterBarriers(ext.framebufferGraphicsWorker);
             ext.framebufferGraphicsWorker->commandList->end();
+            DORA64_FS_TRACE("before draw data wait");
             ext.drawDataUploader->wait();
+            DORA64_FS_TRACE("before transforms wait");
             ext.transformsUploader->wait();
+            DORA64_FS_TRACE("before upload GPU execute");
             ext.framebufferGraphicsWorker->execute();
+            DORA64_FS_TRACE("before upload GPU wait");
             ext.framebufferGraphicsWorker->wait();
+            DORA64_FS_TRACE("before texture GPU upload wait");
             ext.textureCache->waitForGPUUploads();
+            DORA64_FS_TRACE("after texture GPU upload wait");
         }
 
         // Evict from the texture cache that are too old and should no longer be maintained.
@@ -1795,8 +1846,11 @@ namespace RT64 {
         }
         
         // Advance the workload queue at the end of a full synchronization.
+        DORA64_FS_TRACE("before advanceWorkload");
         advanceWorkload(workload, false);
+        DORA64_FS_TRACE("before advanceToNextWorkload");
         ext.workloadQueue->advanceToNextWorkload();
+        DORA64_FS_TRACE("after advanceToNextWorkload");
 
         // Make sure the profiler starts after the workload is advanced to ignore any waiting time.
         dlCpuProfiler.reset();
@@ -2821,6 +2875,25 @@ namespace RT64 {
     }
 
     uint8_t *State::fromRDRAM(uint32_t rdramAddress) const {
+        if (displayListSnapshot != nullptr && rdramAddress >= displayListSnapshotBegin &&
+            rdramAddress < displayListSnapshotEnd) {
+            return const_cast<uint8_t *>(displayListSnapshot + rdramAddress - displayListSnapshotBegin);
+        }
+        if (frameAssetSnapshot != nullptr && rdramAddress >= frameAssetSnapshotBegin &&
+            rdramAddress < frameAssetSnapshotEnd) {
+            return const_cast<uint8_t *>(frameAssetSnapshot + rdramAddress - frameAssetSnapshotBegin);
+        }
+        if (skyDisplayListSnapshot != nullptr &&
+            rdramAddress >= skyDisplayListSnapshotBegin &&
+            rdramAddress < skyDisplayListSnapshotEnd) {
+            return const_cast<uint8_t *>(skyDisplayListSnapshot +
+                rdramAddress - skyDisplayListSnapshotBegin);
+        }
+        if (matrixDataCallback != nullptr) {
+            if (const uint8_t *matrix = matrixDataCallback(rdramAddress)) {
+                return const_cast<uint8_t *>(matrix);
+            }
+        }
         return &RDRAM[rdramAddress];
     }
 

@@ -8,7 +8,10 @@
 #include "Formats.hlsli"
 
 uint EndianSwapUINT16(uint i) {
-    return ((i << 8) & 0xFF00) | ((i >> 8) & 0xFF);
+    // Limit the input first, then mask once after the OR. The result is the
+    // same 16-bit byte swap, but avoids the shader pattern rejected by Adreno.
+    i &= 0xFFFFu;
+    return (i << 8 | i >> 8) & 0xFFFFu;
 }
 
 // This endian swapping function generates a DXC-LLVM code generation bug when optimizations are enabled. All files that include this 

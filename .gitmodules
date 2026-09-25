@@ -42,7 +42,9 @@
 	url = https://github.com/facebook/zstd
 [submodule "src/contrib/re-spirv"]
 	path = src/contrib/re-spirv
-	url = https://github.com/rt64/re-spirv
+	url = https://github.com/citrongames/re-spirv.git
+	branch = dora64-op-image-query-size
 [submodule "src/contrib/plume"]
 	path = src/contrib/plume
-	url = https://github.com/renderbag/plume.git
+	url = https://github.com/citrongames/plume.git
+	branch = main

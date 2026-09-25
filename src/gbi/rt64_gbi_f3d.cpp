@@ -6,6 +6,7 @@
 
 #include <cassert>
 #include <cstdio>
+#include <cstring>
 
 #include "../include/rt64_extended_gbi.h"
 
@@ -76,6 +77,48 @@ namespace RT64 {
                     std::fprintf(stderr, "RT64 F3D MoveMem stack[%zu]: address=0x%08X w0=0x%08X w1=0x%08X\n",
                         stackIndex, callerAddress, caller->w0, caller->w1);
                 }
+#if defined(__ANDROID__)
+                uint32_t changedBytes = 0;
+                uint32_t firstChanged = 0;
+                for (uint32_t offset = 0; offset < state->debugDynamicListAtStart.size(); offset++) {
+                    if (state->debugDynamicListAtStart[offset] != state->RDRAM[0x1D0000u + offset]) {
+                        if (changedBytes == 0) firstChanged = offset;
+                        changedBytes++;
+                    }
+                }
+                std::fprintf(stderr, "RT64 F3D dynamic list changed during parse: bytes=%u first=%08X\n",
+                    changedBytes, 0x1D0000u + firstChanged);
+                if (commandAddress >= 0x1D0000u && commandAddress <= 0x1DFFF8u) {
+                    DisplayList original;
+                    std::memcpy(&original, state->debugDynamicListAtStart.data() + commandAddress - 0x1D0000u,
+                        sizeof(original));
+                    std::fprintf(stderr, "RT64 F3D command at parse start: w0=%08X w1=%08X\n", original.w0, original.w1);
+                }
+                if (!state->returnAddressStack.empty()) {
+                    const DisplayList *caller = state->returnAddressStack.back();
+                    const uint32_t target = caller->w1 & 0x7FFFFFu;
+                    if (caller->w0 == 0x06000000u && target <= 0x800000u - 0x1000u) {
+                        uint32_t hash = 2166136261u;
+                        for (uint32_t i = 0; i < 0x1000u; i++) {
+                            hash = (hash ^ state->RDRAM[target + i]) * 16777619u;
+                        }
+                        uint32_t lastEnd = 0;
+                        for (uint32_t address = target; address < commandAddress; address += 8) {
+                            const DisplayList *candidate = reinterpret_cast<const DisplayList *>(state->RDRAM + address);
+                            if ((candidate->w0 >> 24) == 0xB8u) {
+                                lastEnd = address;
+                            }
+                        }
+                        std::fprintf(stderr, "RT64 F3D nested target=0x%08X hashAtFault=0x%08X lastEndBeforeFault=0x%08X\n",
+                            target, hash, lastEnd);
+                    }
+                }
+                const uint32_t firstAddress = (commandAddress >= 32u * 8u) ? commandAddress - 32u * 8u : 0u;
+                for (uint32_t address = firstAddress; address <= commandAddress + 8u * 8u && address <= 0x800000u - 8u; address += 8u) {
+                    const DisplayList *context = reinterpret_cast<const DisplayList *>(state->RDRAM + address);
+                    std::fprintf(stderr, "RT64 F3D context %08X: %08X %08X\n", address, context->w0, context->w1);
+                }
+#endif
                 std::fflush(stderr);
                 assert(false && "Unimplemented move mem.");
                 break;

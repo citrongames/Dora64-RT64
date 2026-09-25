@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include <array>
+
 #include "xxHash/xxh3.h"
 
 #include "common/rt64_emulator_configuration.h"
@@ -67,6 +69,19 @@ namespace RT64 {
         };
 
         uint8_t *RDRAM;
+        const uint8_t *displayListSnapshot = nullptr;
+        uint32_t displayListSnapshotBegin = 0;
+        uint32_t displayListSnapshotEnd = 0;
+        const uint8_t *frameAssetSnapshot = nullptr;
+        uint32_t frameAssetSnapshotBegin = 0;
+        uint32_t frameAssetSnapshotEnd = 0;
+        const uint8_t *skyDisplayListSnapshot = nullptr;
+        uint32_t skyDisplayListSnapshotBegin = 0;
+        uint32_t skyDisplayListSnapshotEnd = 0;
+        const uint8_t *(*matrixDataCallback)(uint32_t) = nullptr;
+#if defined(__ANDROID__)
+        std::array<uint8_t, 0x10000> debugDynamicListAtStart{};
+#endif
         uint32_t *MI_INTR_REG;
         void (*checkInterrupts)();
         Microcode microcode;

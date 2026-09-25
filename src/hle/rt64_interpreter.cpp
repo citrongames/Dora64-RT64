@@ -5,6 +5,10 @@
 #include "rt64_interpreter.h"
 
 #include <cassert>
+#include <algorithm>
+#include <array>
+#include <cstdio>
+#include <cstring>
 
 //#define DUMP_DISPLAY_LISTS
 
@@ -169,6 +173,12 @@ namespace RT64 {
         DisplayList *dl = dlStart;
         uint8_t opCode;
         GBIFunction func;
+#if defined(__ANDROID__)
+        // Snapshot Doraemon's dynamic nested-list region before parsing.
+        std::memcpy(state->debugDynamicListAtStart.data(), state->RDRAM + 0x1D0000u,
+            state->debugDynamicListAtStart.size());
+        bool firstUnknownLogged = false;
+#endif
         while (dl != nullptr) {
             opCode = (dl->w0 >> 24);
 
@@ -186,6 +196,45 @@ namespace RT64 {
                     func(state, &dl);
                 }
                 else {
+#if defined(__ANDROID__)
+                    if (!firstUnknownLogged) {
+                        firstUnknownLogged = true;
+                        const uint32_t commandAddress = uint32_t(reinterpret_cast<uint8_t *>(dl) - state->RDRAM);
+                        uint32_t changedBytes = 0;
+                        uint32_t firstChanged = 0;
+                        for (uint32_t offset = 0; offset < state->debugDynamicListAtStart.size(); offset++) {
+                            if (state->debugDynamicListAtStart[offset] != state->RDRAM[0x1D0000u + offset]) {
+                                if (changedBytes == 0) firstChanged = offset;
+                                changedBytes++;
+                            }
+                        }
+                        std::fprintf(stderr,
+                            "RT64 first unknown DL: task=%08X command=%08X w0=%08X w1=%08X gbi=%u stack=%zu dynamicChanged=%u firstChanged=%08X\n",
+                            dlStartAdddress, commandAddress, dl->w0, dl->w1,
+                            uint32_t(hleGBI->ucode), state->returnAddressStack.size(),
+                            changedBytes, 0x1D0000u + firstChanged);
+                        if (commandAddress >= 0x1D0000u && commandAddress <= 0x1DFFF8u) {
+                            const uint32_t offset = commandAddress - 0x1D0000u;
+                            DisplayList original;
+                            std::memcpy(&original, state->debugDynamicListAtStart.data() + offset, sizeof(original));
+                            std::fprintf(stderr, "RT64 first unknown at parse start: w0=%08X w1=%08X\n", original.w0, original.w1);
+                        }
+                        for (size_t index = 0; index < state->returnAddressStack.size(); index++) {
+                            const DisplayList *caller = state->returnAddressStack[index];
+                            std::fprintf(stderr, "RT64 unknown stack[%zu]: address=%08X w0=%08X w1=%08X\n",
+                                index, uint32_t(reinterpret_cast<const uint8_t *>(caller) - state->RDRAM), caller->w0, caller->w1);
+                        }
+                        if (commandAddress <= 0x800000u - 8u) {
+                            const uint32_t firstAddress = commandAddress >= 16u * 8u ? commandAddress - 16u * 8u : 0u;
+                            const uint32_t lastAddress = std::min(commandAddress + 4u * 8u, 0x800000u - 8u);
+                            for (uint32_t address = firstAddress; address <= lastAddress; address += 8u) {
+                                const DisplayList *context = reinterpret_cast<const DisplayList *>(state->RDRAM + address);
+                                std::fprintf(stderr, "RT64 unknown context %08X: %08X %08X\n", address, context->w0, context->w1);
+                            }
+                        }
+                        std::fflush(stderr);
+                    }
+#endif
                     RT64_LOG_PRINTF("DL Parser ran into an unknown opCode (GBI %u): %u / 0x%X", uint32_t(hleGBI->ucode), opCode, opCode);
                 }
             }

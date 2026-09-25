@@ -481,8 +481,9 @@ namespace RT64 {
                     ext.presentGraphicsWorker->commandList->end();
                     ext.presentGraphicsWorker->execute();
                     ext.presentGraphicsWorker->wait();
-                    swapChainValid = ext.swapChain->resize();
+                    // Framebuffers reference the image views resize is about to destroy.
                     swapChainFramebuffers.clear();
+                    swapChainValid = ext.swapChain->resize();
 
                     if (swapChainValid) {
                         ext.sharedResources->setSwapChainSize(ext.swapChain->getWidth(), ext.swapChain->getHeight());
@@ -499,7 +500,7 @@ namespace RT64 {
                     ext.sharedResources->setSwapChainRate(std::min(ext.appWindow->getRefreshRate(), displayTimingRate));
                 }
 
-                if (displayTiming) {
+                if (displayTiming && swapChainValid) {
                     uint32_t newDisplayTimingRate = ext.swapChain->getRefreshRate();
                     if (newDisplayTimingRate == 0) {
                         newDisplayTimingRate = UINT32_MAX;
@@ -511,7 +512,7 @@ namespace RT64 {
                     }
                 }
 
-                skipPresent = skipPresent || ext.swapChain->isEmpty();
+                skipPresent = skipPresent || !swapChainValid || ext.swapChain->isEmpty();
 
                 Present &present = presents[processCursor];
                 ext.workloadQueue->waitForWorkloadId(present.workloadId);
