@@ -47,4 +47,4 @@
 [submodule "src/contrib/plume"]
 	path = src/contrib/plume
 	url = https://github.com/citrongames/plume.git
-	branch = android-sdl-window
+	branch = main
