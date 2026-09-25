@@ -2879,6 +2879,21 @@ namespace RT64 {
             rdramAddress < displayListSnapshotEnd) {
             return const_cast<uint8_t *>(displayListSnapshot + rdramAddress - displayListSnapshotBegin);
         }
+        if (frameAssetSnapshot != nullptr && rdramAddress >= frameAssetSnapshotBegin &&
+            rdramAddress < frameAssetSnapshotEnd) {
+            return const_cast<uint8_t *>(frameAssetSnapshot + rdramAddress - frameAssetSnapshotBegin);
+        }
+        if (skyDisplayListSnapshot != nullptr &&
+            rdramAddress >= skyDisplayListSnapshotBegin &&
+            rdramAddress < skyDisplayListSnapshotEnd) {
+            return const_cast<uint8_t *>(skyDisplayListSnapshot +
+                rdramAddress - skyDisplayListSnapshotBegin);
+        }
+        if (matrixDataCallback != nullptr) {
+            if (const uint8_t *matrix = matrixDataCallback(rdramAddress)) {
+                return const_cast<uint8_t *>(matrix);
+            }
+        }
         return &RDRAM[rdramAddress];
     }
 

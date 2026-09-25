@@ -72,6 +72,13 @@ namespace RT64 {
         const uint8_t *displayListSnapshot = nullptr;
         uint32_t displayListSnapshotBegin = 0;
         uint32_t displayListSnapshotEnd = 0;
+        const uint8_t *frameAssetSnapshot = nullptr;
+        uint32_t frameAssetSnapshotBegin = 0;
+        uint32_t frameAssetSnapshotEnd = 0;
+        const uint8_t *skyDisplayListSnapshot = nullptr;
+        uint32_t skyDisplayListSnapshotBegin = 0;
+        uint32_t skyDisplayListSnapshotEnd = 0;
+        const uint8_t *(*matrixDataCallback)(uint32_t) = nullptr;
 #if defined(__ANDROID__)
         std::array<uint8_t, 0x10000> debugDynamicListAtStart{};
 #endif
