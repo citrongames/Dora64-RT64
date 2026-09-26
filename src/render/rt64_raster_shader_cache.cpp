@@ -122,7 +122,7 @@ namespace RT64 {
 
         // Initialize the re-spirv optimizer cache.
         if (shaderFormat == RenderShaderFormat::SPIRV) {
-            optimizerCacheSPIRV.initialize(shaderUber->usesTextureFallback.load(), !device->getCapabilities().dualSourceBlend);
+            optimizerCacheSPIRV.initialize(shaderUber->usesTextureFallback.load(), !device->getCapabilities().dualSourceBlend, device->getCapabilities().localTextureDescriptors);
         }
     }
 

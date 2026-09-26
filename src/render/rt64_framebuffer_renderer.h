@@ -89,6 +89,18 @@ namespace RT64 {
         RenderPipeline *postBlendDitherNoiseSubNegativePipeline = nullptr;
         std::unique_ptr<FramebufferRendererDescriptorCommonSet> descCommonSet;
         std::unique_ptr<FramebufferRendererDescriptorTextureSet> descTextureSet;
+        bool localTextures = false;
+        std::vector<interop::GPUTile> localGPUTiles;
+        struct LocalTextureSets {
+            std::unique_ptr<FramebufferRendererDescriptorTextureSet> color, tmem;
+            bool initialized = false;
+            bool realColor[8] = {}, realTMEM[8] = {};
+        };
+        std::vector<LocalTextureSets> localTextureSets;
+        std::unique_ptr<RenderTexture> localUnusedColor, localUnusedTMEM;
+        bool localUnusedTransitioned = false;
+        std::unique_ptr<RenderBuffer> localZeroUpload;
+        void updateLocalTextureSets(RenderWorker *worker);
         std::unique_ptr<RenderTexture> dummyColorTarget;
         std::unique_ptr<RenderTexture> dummyDepthTarget;
         std::unique_ptr<RenderTextureView> dummyColorTargetView;

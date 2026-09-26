@@ -4,10 +4,11 @@
 
 #include "Depth.hlsli"
 #include "FbCommon.hlsli"
+#include "NativeFramebufferBuffer.hlsli"
 
 [[vk::push_constant]] ConstantBuffer<FbCommonCB> gConstants : register(b0, space0);
-Buffer<uint> gNewInput : register(t1, space0);
-Buffer<uint> gCurInput : register(t2, space0);
+NATIVE_FB_INPUT gNewInput : register(t1, space0);
+NATIVE_FB_INPUT gCurInput : register(t2, space0);
 RWStructuredBuffer<uint> gOutputCount : register(u3, space0);
 RWTexture2D<float4> gOutputChangeColor : register(u0, space1);
 RWTexture2D<float> gOutputChangeDepth : register(u1, space1);
@@ -18,8 +19,8 @@ void CSMain(uint2 coord : SV_DispatchThreadID) {
     if ((coord.x < gConstants.resolution.x) && (coord.y < gConstants.resolution.y)) {
         const uint bufferIndex = coord.y * gConstants.resolution.x.x + coord.x;
         const uint2 pixelCoord = gConstants.offset + coord.xy;
-        if (gNewInput[bufferIndex] != gCurInput[bufferIndex]) {
-            const uint swappedUint = EndianSwapUINT(gNewInput[bufferIndex], gConstants.siz);
+        if (loadNativePixel(gNewInput, bufferIndex, gConstants.siz) != loadNativePixel(gCurInput, bufferIndex, gConstants.siz)) {
+            const uint swappedUint = EndianSwapUINT(loadNativePixel(gNewInput, bufferIndex, gConstants.siz), gConstants.siz);
             if (gConstants.fmt == G_IM_FMT_DEPTH) {
                 const float newDepth = Depth16ToFloat(swappedUint);
                 gOutputChangeDepth[pixelCoord] = newDepth;

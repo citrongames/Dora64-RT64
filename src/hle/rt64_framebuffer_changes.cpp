@@ -75,8 +75,13 @@ namespace RT64 {
             break;
         }
 
+        // SPIR-V declares rgba32f/r32ui outputs. Narrow storage formats are
+        // optional in Vulkan and cannot be used on older mobile GPUs.
+        const bool storage32 = renderWorker->device->getCapabilities().nativeFramebuffer32Bit;
+        if (storage32 && type == FramebufferChange::Type::Color)
+            pixelFormat = RenderFormat::R32G32B32A32_FLOAT;
         changes.pixelTexture = renderWorker->device->createTexture(RenderTextureDesc::Texture2D(alignedWidth, alignedHeight, 1, pixelFormat, RenderTextureFlag::STORAGE | RenderTextureFlag::UNORDERED_ACCESS));
-        changes.booleanTexture = renderWorker->device->createTexture(RenderTextureDesc::Texture2D(alignedWidth, alignedHeight, 1, RenderFormat::R8_UINT, RenderTextureFlag::STORAGE | RenderTextureFlag::UNORDERED_ACCESS));
+        changes.booleanTexture = renderWorker->device->createTexture(RenderTextureDesc::Texture2D(alignedWidth, alignedHeight, 1, storage32 ? RenderFormat::R32_UINT : RenderFormat::R8_UINT, RenderTextureFlag::STORAGE | RenderTextureFlag::UNORDERED_ACCESS));
         changes.drawDescSet = std::make_unique<FramebufferDrawChangesDescriptorSet>(renderWorker->device);
         changes.drawDescSet->setTexture(changes.drawDescSet->gColor, changes.pixelTexture.get(), RenderTextureLayout::SHADER_READ);
         changes.drawDescSet->setTexture(changes.drawDescSet->gDepth, changes.pixelTexture.get(), RenderTextureLayout::SHADER_READ);

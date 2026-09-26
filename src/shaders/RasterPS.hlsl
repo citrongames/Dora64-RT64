@@ -170,7 +170,10 @@ LIBRARY_EXPORT bool RasterPS(const RenderParams rp, float4 vertexPosition, float
             rdpTile.nativeSampler = renderFlagNativeSampler0(rp.flags);
         }
         
-        const GPUTile gpuTile = GPUTiles[globalTileIndex];
+        GPUTile gpuTile = GPUTiles[globalTileIndex];
+#if defined(RT64_LOCAL_TEXTURES)
+        gpuTile.textureIndex = globalTileIndex - instanceRenderIndices[gConstants.renderIndex].rdpTileIndex;
+#endif
         const float2 textureUV = gpuTileFlagHighRes(gpuTile.flags) ? vertexUV : lowResUV;
         texVal0 = sampleTexture(otherMode, rp.flags, textureUV, ddxVertexUV, ddyVertexUV, rdpTile, gpuTile, false);
     }
@@ -185,7 +188,10 @@ LIBRARY_EXPORT bool RasterPS(const RenderParams rp, float4 vertexPosition, float
             rdpTile.nativeSampler = oneCycleHardwareBug ? renderFlagNativeSampler0(rp.flags) : renderFlagNativeSampler1(rp.flags);
         }
         
-        const GPUTile gpuTile = GPUTiles[globalTileIndex];
+        GPUTile gpuTile = GPUTiles[globalTileIndex];
+#if defined(RT64_LOCAL_TEXTURES)
+        gpuTile.textureIndex = globalTileIndex - instanceRenderIndices[gConstants.renderIndex].rdpTileIndex;
+#endif
         const float2 textureUV = gpuTileFlagHighRes(gpuTile.flags) ? vertexUV : lowResUV;
         const uint nativeSampler = renderFlagNativeSampler1(rp.flags);
         texVal1 = sampleTexture(otherMode, rp.flags, textureUV, ddxVertexUV, ddyVertexUV, rdpTile, gpuTile, oneCycleHardwareBug);

@@ -36,7 +36,12 @@ namespace RT64 {
         readBuffer.nativeBufferNextView.reset();
         readBuffer.nativeBufferWriteView.reset();
         readBuffer.nativeUploadBuffer.reset();
-        readBuffer.nativeBuffer = worker->device->createBuffer(RenderBufferDesc::DefaultBuffer(bufferSize, RenderBufferFlag::STORAGE | RenderBufferFlag::UNORDERED_ACCESS | RenderBufferFlag::FORMATTED));
+        // A packed store can include a partial last word; logical RAM copies
+        // retain their original size, while the device allocation covers it.
+        bufferSize = (bufferSize + 3U) & ~3U;
+        RenderBufferFlags flags = RenderBufferFlag::STORAGE | RenderBufferFlag::UNORDERED_ACCESS;
+        if (!worker->device->getCapabilities().nativeFramebuffer32Bit) flags |= RenderBufferFlag::FORMATTED;
+        readBuffer.nativeBuffer = worker->device->createBuffer(RenderBufferDesc::DefaultBuffer(bufferSize, flags));
         readBuffer.nativeBufferSize = bufferSize;
     }
 
@@ -87,6 +92,8 @@ namespace RT64 {
             break;
         }
 
+        const bool wordBuffers = worker->device->getCapabilities().nativeFramebuffer32Bit;
+
         // Copy to the native upload resource.
         const bool hasCurrentResource = !invalidateTargets && (readBufferHistoryCount > 0);
         const uint32_t bufferSize = getNativeSize(width, height, siz);
@@ -115,19 +122,25 @@ namespace RT64 {
             readBuffer.nativeUploadBuffer = worker->device->createBuffer(RenderBufferDesc::UploadBuffer(readBuffer.nativeBufferSize));
         }
 
-        if ((readBuffer.nativeBufferView == nullptr) || (readBuffer.nativeBufferViewFormat != siz)) {
+        if (!wordBuffers && ((readBuffer.nativeBufferView == nullptr) || (readBuffer.nativeBufferViewFormat != siz))) {
             readBuffer.nativeBufferView = readBuffer.nativeBuffer->createBufferFormattedView(getBufferFormat(siz));
             readBuffer.nativeBufferViewFormat = siz;
         }
 
         if (readBuffer.readDescSet == nullptr) {
-            readBuffer.readDescSet = std::make_unique<FramebufferReadChangesDescriptorBufferSet>(worker->device);
+            readBuffer.readDescSet = std::make_unique<FramebufferReadChangesDescriptorBufferSet>(worker->device, wordBuffers);
         }
 
-        readBuffer.readDescSet->setBuffer(readBuffer.readDescSet->gNewInput, readBuffer.nativeBuffer.get(), readBuffer.nativeBufferSize, readBuffer.nativeBufferView.get());
+        if (wordBuffers)
+            readBuffer.readDescSet->setBuffer(readBuffer.readDescSet->gNewInput, readBuffer.nativeBuffer.get(), RenderBufferStructuredView(sizeof(uint32_t)));
+        else
+            readBuffer.readDescSet->setBuffer(readBuffer.readDescSet->gNewInput, readBuffer.nativeBuffer.get(), readBuffer.nativeBufferSize, readBuffer.nativeBufferView.get());
         readBuffer.readDescSet->setBuffer(readBuffer.readDescSet->gOutputCount, changeCountBuffer.get(), RenderBufferStructuredView(sizeof(uint32_t)));
 
-        if (previousReadBuffer != nullptr) {
+        if (previousReadBuffer != nullptr && wordBuffers) {
+            readBuffer.readDescSet->setBuffer(readBuffer.readDescSet->gCurInput, previousReadBuffer->nativeBuffer.get(), RenderBufferStructuredView(sizeof(uint32_t)));
+        }
+        else if (previousReadBuffer != nullptr) {
             const RenderBufferFormattedView *previousBufferView = nullptr;
             if ((previousReadBuffer->nativeBufferView != nullptr) && (previousReadBuffer->nativeBufferViewFormat == siz)) {
                 previousBufferView = previousReadBuffer->nativeBufferView.get();
@@ -315,7 +328,8 @@ namespace RT64 {
             createReadBuffer(worker, *readBuffer, bufferSize);
         }
 
-        if ((readBuffer->nativeBufferWriteView == nullptr) || (readBuffer->nativeBufferWriteViewFormat != siz)) {
+        const bool wordBuffers = worker->device->getCapabilities().nativeFramebuffer32Bit;
+        if (!wordBuffers && ((readBuffer->nativeBufferWriteView == nullptr) || (readBuffer->nativeBufferWriteViewFormat != siz))) {
             readBuffer->nativeBufferWriteView = readBuffer->nativeBuffer->createBufferFormattedView(getBufferFormat(siz));
             readBuffer->nativeBufferWriteViewFormat = siz;
         }
@@ -326,10 +340,13 @@ namespace RT64 {
         }
 
         if (writeBuffer.writeDescSet == nullptr) {
-            writeBuffer.writeDescSet = std::make_unique<FramebufferWriteDescriptorBufferSet>(worker->device);
+            writeBuffer.writeDescSet = std::make_unique<FramebufferWriteDescriptorBufferSet>(worker->device, wordBuffers);
         }
 
-        writeBuffer.writeDescSet->setBuffer(writeBuffer.writeDescSet->gOutput, readBuffer->nativeBuffer.get(), bufferSize, readBuffer->nativeBufferWriteView.get());
+        if (wordBuffers)
+            writeBuffer.writeDescSet->setBuffer(writeBuffer.writeDescSet->gOutput, readBuffer->nativeBuffer.get(), RenderBufferStructuredView(sizeof(uint32_t)));
+        else
+            writeBuffer.writeDescSet->setBuffer(writeBuffer.writeDescSet->gOutput, readBuffer->nativeBuffer.get(), readBuffer->nativeBufferSize, readBuffer->nativeBufferWriteView.get());
 
         if (smallerReadBuffer != nullptr) {
             RenderBufferBarrier copyBarriers[] = {

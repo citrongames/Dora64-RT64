@@ -15,6 +15,13 @@
 #include "shaders/FbReadAnyFullCS.hlsl.spirv.h"
 #include "shaders/FbReinterpretCS.hlsl.spirv.h"
 #include "shaders/FbWriteColorCS.hlsl.spirv.h"
+#if defined(__ANDROID__)
+#include "shaders/FbWritePackedColorCS.hlsl.spirv.h"
+#include "shaders/FbReadWordsFullCS.hlsl.spirv.h"
+#include "shaders/FbReadWordsChangesCS.hlsl.spirv.h"
+#include "shaders/FbWritePackedDepthCS.hlsl.spirv.h"
+#include "shaders/FbWritePackedDepthCSMS.hlsl.spirv.h"
+#endif
 #include "shaders/FbWriteDepthCS.hlsl.spirv.h"
 #include "shaders/FbWriteDepthCSMS.hlsl.spirv.h"
 #include "shaders/GaussianFilterRGB3x3CS.hlsl.spirv.h"
@@ -372,7 +379,7 @@ namespace RT64 {
 
         // Framebuffer read any changes and full.
         {
-            FramebufferReadChangesDescriptorBufferSet descriptorBufferSet;
+            FramebufferReadChangesDescriptorBufferSet descriptorBufferSet(nullptr, device->getCapabilities().nativeFramebuffer32Bit);
             FramebufferReadChangesDescriptorChangesSet descriptorChangesSet;
             layoutBuilder.begin();
             layoutBuilder.addPushConstant(0, 0, sizeof(interop::FbCommonCB), RenderShaderStageFlag::COMPUTE);
@@ -382,10 +389,22 @@ namespace RT64 {
             fbReadAnyChanges.pipelineLayout = layoutBuilder.create(device);
             fbReadAnyFull.pipelineLayout = layoutBuilder.create(device);
 
-            std::unique_ptr<RenderShader> anyChangesShader = device->createShader(CREATE_SHADER_INPUTS(FbReadAnyChangesCSBlobDXIL, FbReadAnyChangesCSBlobSPIRV, FbReadAnyChangesCSBlobMSL, "CSMain", shaderFormat));
+            std::unique_ptr<RenderShader> anyChangesShader;
+#if defined(__ANDROID__)
+            if (device->getCapabilities().nativeFramebuffer32Bit)
+                anyChangesShader = device->createShader(FbReadWordsChangesCSBlobSPIRV, sizeof(FbReadWordsChangesCSBlobSPIRV), "CSMain", shaderFormat);
+            else
+#endif
+                anyChangesShader = device->createShader(CREATE_SHADER_INPUTS(FbReadAnyChangesCSBlobDXIL, FbReadAnyChangesCSBlobSPIRV, FbReadAnyChangesCSBlobMSL, "CSMain", shaderFormat));
             fbReadAnyChanges.pipeline = device->createComputePipeline(RenderComputePipelineDesc(fbReadAnyChanges.pipelineLayout.get(), anyChangesShader.get(), 8, 8, 1));
 
-            std::unique_ptr<RenderShader> fullShader = device->createShader(CREATE_SHADER_INPUTS(FbReadAnyFullCSBlobDXIL, FbReadAnyFullCSBlobSPIRV, FbReadAnyFullCSBlobMSL, "CSMain", shaderFormat));
+            std::unique_ptr<RenderShader> fullShader;
+#if defined(__ANDROID__)
+            if (device->getCapabilities().nativeFramebuffer32Bit)
+                fullShader = device->createShader(FbReadWordsFullCSBlobSPIRV, sizeof(FbReadWordsFullCSBlobSPIRV), "CSMain", shaderFormat);
+            else
+#endif
+                fullShader = device->createShader(CREATE_SHADER_INPUTS(FbReadAnyFullCSBlobDXIL, FbReadAnyFullCSBlobSPIRV, FbReadAnyFullCSBlobMSL, "CSMain", shaderFormat));
             fbReadAnyFull.pipeline = device->createComputePipeline(RenderComputePipelineDesc(fbReadAnyFull.pipelineLayout.get(), fullShader.get(), 8, 8, 1));
         }
 
@@ -405,7 +424,7 @@ namespace RT64 {
 
         // Framebuffer write color or depth.
         {
-            FramebufferWriteDescriptorBufferSet descriptorBufferSet;
+            FramebufferWriteDescriptorBufferSet descriptorBufferSet(nullptr, device->getCapabilities().nativeFramebuffer32Bit);
             FramebufferWriteDescriptorTextureSet descriptorTextureSet;
             layoutBuilder.begin();
             layoutBuilder.addPushConstant(0, 0, sizeof(interop::FbCommonCB), RenderShaderStageFlag::COMPUTE);
@@ -416,13 +435,31 @@ namespace RT64 {
             fbWriteDepth.pipelineLayout = layoutBuilder.create(device);
             fbWriteDepthMS.pipelineLayout = layoutBuilder.create(device);
 
-            std::unique_ptr<RenderShader> colorShader = device->createShader(CREATE_SHADER_INPUTS(FbWriteColorCSBlobDXIL, FbWriteColorCSBlobSPIRV, FbWriteColorCSBlobMSL, "CSMain", shaderFormat));
+            std::unique_ptr<RenderShader> colorShader;
+#if defined(__ANDROID__)
+            if (device->getCapabilities().nativeFramebuffer32Bit)
+                colorShader = device->createShader(FbWritePackedColorCSBlobSPIRV, sizeof(FbWritePackedColorCSBlobSPIRV), "CSMain", shaderFormat);
+            else
+#endif
+                colorShader = device->createShader(CREATE_SHADER_INPUTS(FbWriteColorCSBlobDXIL, FbWriteColorCSBlobSPIRV, FbWriteColorCSBlobMSL, "CSMain", shaderFormat));
             fbWriteColor.pipeline = device->createComputePipeline(RenderComputePipelineDesc(fbWriteColor.pipelineLayout.get(), colorShader.get(), 8, 8, 1));
 
-            std::unique_ptr<RenderShader> depthShader = device->createShader(CREATE_SHADER_INPUTS(FbWriteDepthCSBlobDXIL, FbWriteDepthCSBlobSPIRV, FbWriteDepthCSBlobMSL, "CSMain", shaderFormat));
+            std::unique_ptr<RenderShader> depthShader;
+#if defined(__ANDROID__)
+            if (device->getCapabilities().nativeFramebuffer32Bit)
+                depthShader = device->createShader(FbWritePackedDepthCSBlobSPIRV, sizeof(FbWritePackedDepthCSBlobSPIRV), "CSMain", shaderFormat);
+            else
+#endif
+                depthShader = device->createShader(CREATE_SHADER_INPUTS(FbWriteDepthCSBlobDXIL, FbWriteDepthCSBlobSPIRV, FbWriteDepthCSBlobMSL, "CSMain", shaderFormat));
             fbWriteDepth.pipeline = device->createComputePipeline(RenderComputePipelineDesc(fbWriteDepth.pipelineLayout.get(), depthShader.get(), 8, 8, 1));
 
-            std::unique_ptr<RenderShader> depthShaderMS = device->createShader(CREATE_SHADER_INPUTS(FbWriteDepthCSMSBlobDXIL, FbWriteDepthCSMSBlobSPIRV, FbWriteDepthCSMSBlobMSL, "CSMain", shaderFormat));
+            std::unique_ptr<RenderShader> depthShaderMS;
+#if defined(__ANDROID__)
+            if (device->getCapabilities().nativeFramebuffer32Bit)
+                depthShaderMS = device->createShader(FbWritePackedDepthCSMSBlobSPIRV, sizeof(FbWritePackedDepthCSMSBlobSPIRV), "CSMain", shaderFormat);
+            else
+#endif
+                depthShaderMS = device->createShader(CREATE_SHADER_INPUTS(FbWriteDepthCSMSBlobDXIL, FbWriteDepthCSMSBlobSPIRV, FbWriteDepthCSMSBlobMSL, "CSMain", shaderFormat));
             fbWriteDepthMS.pipeline = device->createComputePipeline(RenderComputePipelineDesc(fbWriteDepthMS.pipelineLayout.get(), depthShaderMS.get(), 8, 8, 1));
         }
 

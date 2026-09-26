@@ -14,18 +14,39 @@
 #define RDP_TMEM_MASK8 0xFFF
 #define RDP_TMEM_MASK16 0x7FF
 
-uint implLoadTMEM(uint relativeAddress, uint maskAddress, uint orAddress, bool oddRow, uint textureStart, uint rowSize, Texture1D<uint> TMEM) {
+#if defined(RT64_LOCAL_TEXTURES)
+#define RT64_TMEM_SOURCE uint
+uint localTMEMByte(uint slot, uint address) {
+    switch (slot) {
+    case 0: return gTMEM[0].Load(int2(address, 0));
+    case 1: return gTMEM[1].Load(int2(address, 0));
+    case 2: return gTMEM[2].Load(int2(address, 0));
+    case 3: return gTMEM[3].Load(int2(address, 0));
+    case 4: return gTMEM[4].Load(int2(address, 0));
+    case 5: return gTMEM[5].Load(int2(address, 0));
+    case 6: return gTMEM[6].Load(int2(address, 0));
+    case 7: return gTMEM[7].Load(int2(address, 0));
+    default: return 0;
+    }
+}
+#define RT64_TMEM_LOAD(source, address) localTMEMByte(source, address)
+#else
+#define RT64_TMEM_SOURCE Texture1D<uint>
+#define RT64_TMEM_LOAD(source, address) source.Load(int2(address, 0))
+#endif
+
+uint implLoadTMEM(uint relativeAddress, uint maskAddress, uint orAddress, bool oddRow, uint textureStart, uint rowSize, RT64_TMEM_SOURCE TMEM) {
     const uint rowStart = (relativeAddress / rowSize) * rowSize;
     const uint wordIndex = (relativeAddress - rowStart) / 4;
     const uint swapWordIndex = wordIndex ^ 1;
     const uint finalAddress = select_uint(oddRow,
         textureStart + rowStart + (swapWordIndex * 4) + (relativeAddress & 0x3),
         textureStart + relativeAddress);
-    return TMEM.Load(int2(((finalAddress & maskAddress) | orAddress) & RDP_TMEM_MASK8, 0));
+    return RT64_TMEM_LOAD(TMEM, ((finalAddress & maskAddress) | orAddress) & RDP_TMEM_MASK8);
 }
 
 #define loadTMEMMasked(relativeAddress, mask, orAddress) implLoadTMEM(relativeAddress, mask, orAddress, oddRow, address, stride, TMEM)
-#define loadTLUT(paletteAddress) TMEM.Load(uint2((paletteAddress) & RDP_TMEM_MASK8, 0))
+#define loadTLUT(paletteAddress) RT64_TMEM_LOAD(TMEM, (paletteAddress) & RDP_TMEM_MASK8)
 
 float4 sampleTMEMIA4(uint pixelValue4bit) {
     return IA4ToFloat4(pixelValue4bit);
@@ -146,7 +167,7 @@ float4 sampleTMEM32b(bool oddColumn, uint pixelValue0, uint pixelValue1, uint pi
     }
 }
 
-float4 sampleTMEM(int2 texelInt, uint siz, uint fmt, uint address, uint stride, uint tlut, uint palette, Texture1D<uint> TMEM) {
+float4 sampleTMEM(int2 texelInt, uint siz, uint fmt, uint address, uint stride, uint tlut, uint palette, RT64_TMEM_SOURCE TMEM) {
     const bool oddRow = (texelInt.y & 1);
     const bool oddColumn = (texelInt.x & 1);
     const bool isRgba32 = and(fmt == G_IM_FMT_RGBA, siz == G_IM_SIZ_32b);

@@ -37,7 +37,7 @@ namespace RT64 {
         respv::Shader rasterPSFlat;
         respv::Shader rasterPSFlatMS;
 
-        void initialize(bool textureFallback = false, bool separateCoverage = false);
+        void initialize(bool textureFallback = false, bool separateCoverage = false, bool localTextures = false);
     };
 
     struct PipelineCreation {

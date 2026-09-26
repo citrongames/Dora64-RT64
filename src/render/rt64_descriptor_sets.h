@@ -85,10 +85,10 @@ namespace RT64 {
         uint32_t gCurInput;
         uint32_t gOutputCount;
 
-        FramebufferReadChangesDescriptorBufferSet(RenderDevice *device = nullptr) {
+        FramebufferReadChangesDescriptorBufferSet(RenderDevice *device = nullptr, bool wordBuffers = false) {
             builder.begin();
-            gNewInput = builder.addFormattedBuffer(1);
-            gCurInput = builder.addFormattedBuffer(2);
+            gNewInput = wordBuffers ? builder.addStructuredBuffer(1) : builder.addFormattedBuffer(1);
+            gCurInput = wordBuffers ? builder.addStructuredBuffer(2) : builder.addFormattedBuffer(2);
             gOutputCount = builder.addReadWriteStructuredBuffer(3);
             builder.end();
 
@@ -119,9 +119,9 @@ namespace RT64 {
     struct FramebufferWriteDescriptorBufferSet : RenderDescriptorSetBase {
         uint32_t gOutput;
 
-        FramebufferWriteDescriptorBufferSet(RenderDevice *device = nullptr) {
+        FramebufferWriteDescriptorBufferSet(RenderDevice *device = nullptr, bool wordBuffers = false) {
             builder.begin();
-            gOutput = builder.addReadWriteFormattedBuffer(1);
+            gOutput = wordBuffers ? builder.addReadWriteStructuredBuffer(1) : builder.addReadWriteFormattedBuffer(1);
             builder.end();
 
             if (device != nullptr) {
@@ -213,7 +213,7 @@ namespace RT64 {
         uint32_t gFilteredIndirectLight;
         uint32_t gBlueNoise;
 
-        FramebufferRendererDescriptorCommonSet(const SamplerLibrary &samplerLibrary, bool raytracing, RenderDevice *device = nullptr) {
+        FramebufferRendererDescriptorCommonSet(const SamplerLibrary &samplerLibrary, bool raytracing, RenderDevice *device = nullptr, bool localTextures = false) {
             builder.begin();
             FrParams = builder.addConstantBuffer(1);
             instanceRDPParams = builder.addStructuredBuffer(2);
@@ -230,6 +230,11 @@ namespace RT64 {
             gLinearClampWrapSampler = builder.addImmutableSampler(13, samplerLibrary.linear.clampWrap.get());
             gLinearClampMirrorSampler = builder.addImmutableSampler(14, samplerLibrary.linear.clampMirror.get());
             gLinearClampClampSampler = builder.addImmutableSampler(15, samplerLibrary.linear.clampClamp.get());
+            if (localTextures) {
+                builder.end();
+                if (device != nullptr) create(device);
+                return;
+            }
             gNearestWrapWrapSampler = builder.addImmutableSampler(16, samplerLibrary.nearest.wrapWrap.get());
             gNearestWrapMirrorSampler = builder.addImmutableSampler(17, samplerLibrary.nearest.wrapMirror.get());
             gNearestWrapClampSampler = builder.addImmutableSampler(18, samplerLibrary.nearest.wrapClamp.get());
@@ -301,11 +306,11 @@ namespace RT64 {
         uint32_t gTextures;
         uint32_t gTMEM;
 
-        FramebufferRendererDescriptorTextureSet(RenderDevice *device = nullptr, uint32_t textureCacheSize = 0) {
+        FramebufferRendererDescriptorTextureSet(RenderDevice *device = nullptr, uint32_t textureCacheSize = 0, bool localTextures = false) {
             this->textureCacheSize = textureCacheSize;
 
             builder.begin();
-            gTextures = builder.addTexture(0, UpperRange);
+            gTextures = builder.addTexture(0, localTextures ? 8 : UpperRange);
             gTMEM = gTextures;
 #if defined(__ANDROID__)
             builder.end();

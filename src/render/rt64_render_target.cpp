@@ -483,8 +483,8 @@ namespace RT64 {
         if (!coverageTexture) {
             return;
         }
-#if defined(__ANDROID__)
-        // Temporary performance audit; no GPU readback or additional waits.
+#if defined(__ANDROID__) && defined(DORA64_ANDROID_DIAGNOSTICS)
+        // Optional performance audit; no GPU readback or additional waits.
         static thread_local uint32_t reused = 0, seeded = 0;
         if (coverageSynchronized) { ++reused; } else { ++seeded; }
         if ((reused + seeded) == 240) {

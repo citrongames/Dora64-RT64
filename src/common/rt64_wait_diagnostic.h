@@ -7,11 +7,11 @@
 #endif
 
 namespace RT64 {
-    // Temporary Android diagnosis: preserve the predicate and never proceed
+    // Optional Android diagnosis: preserve the predicate and never proceed
     // after a timeout. Only report sustained active frame waits, not idle work.
     template <typename Condition, typename Lock, typename Predicate, typename Report>
     void waitWithDiagnostic(Condition &condition, Lock &lock, Predicate predicate, Report report) {
-#if defined(__ANDROID__)
+#if defined(__ANDROID__) && defined(DORA64_ANDROID_DIAGNOSTICS)
         unsigned timeouts = 0;
         while (!condition.wait_for(lock, std::chrono::seconds(5), predicate)) {
             if ((timeouts++ % 6) == 0) {

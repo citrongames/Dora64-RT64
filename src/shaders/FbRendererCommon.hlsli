@@ -29,6 +29,7 @@ SamplerState gLinearMirrorClampSampler : register(s12, space0);
 SamplerState gLinearClampWrapSampler : register(s13, space0);
 SamplerState gLinearClampMirrorSampler : register(s14, space0);
 SamplerState gLinearClampClampSampler : register(s15, space0);
+#if !defined(RT64_LOCAL_TEXTURES)
 SamplerState gNearestWrapWrapSampler : register(s16, space0);
 SamplerState gNearestWrapMirrorSampler : register(s17, space0);
 SamplerState gNearestWrapClampSampler : register(s18, space0);
@@ -38,6 +39,12 @@ SamplerState gNearestMirrorClampSampler : register(s21, space0);
 SamplerState gNearestClampWrapSampler : register(s22, space0);
 SamplerState gNearestClampMirrorSampler : register(s23, space0);
 SamplerState gNearestClampClampSampler : register(s24, space0);
+#endif
+
+#if defined(RT64_LOCAL_TEXTURES)
+#undef RT64_TEXTURE_CACHE_SIZE
+#define RT64_TEXTURE_CACHE_SIZE 8
+#endif
 
 #ifndef RT64_TEXTURE_CACHE_SIZE
 #define RT64_TEXTURE_CACHE_SIZE 8192

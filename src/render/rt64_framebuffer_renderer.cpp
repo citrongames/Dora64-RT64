@@ -3,6 +3,8 @@
 //
 
 #include "rt64_framebuffer_renderer.h"
+#include <stdexcept>
+#include <cstring>
 
 #include "../include/rt64_extended_gbi.h"
 
@@ -146,13 +148,14 @@ namespace RT64 {
         assert(worker != nullptr);
 
         this->shaderLibrary = shaderLibrary;
+        localTextures = worker->device->getCapabilities().localTextureDescriptors;
 
         frameParams.frameCount = 0;
         frameParams.viewUbershaders = false;
         frameParams.ditherNoiseStrength = 1.0f;
 
         shaderUploader = std::make_unique<BufferUploader>(worker->device);
-        descCommonSet = std::make_unique<FramebufferRendererDescriptorCommonSet>(shaderLibrary->samplerLibrary, worker->device->getCapabilities().raytracing, worker->device);
+        descCommonSet = std::make_unique<FramebufferRendererDescriptorCommonSet>(shaderLibrary->samplerLibrary, worker->device->getCapabilities().raytracing, worker->device, localTextures);
 
 #   if RT_ENABLED
         if (rtSupport) {
@@ -173,6 +176,7 @@ namespace RT64 {
         instanceDrawCallVector.clear();
         hitGroupVector.clear();
         renderIndicesVector.clear();
+        localGPUTiles.clear();
         rspSmoothNormalVector.clear();
         frameParams.viewUbershaders = ubershadersVisible;
         frameParams.ditherNoiseStrength = ditherNoiseStrength;
@@ -281,6 +285,7 @@ namespace RT64 {
                 gpuTile.flags.forceNearestFiltering = forceNearestFiltering;
             }
         }
+        if (localTextures) localGPUTiles.assign(dstGPUTiles, dstGPUTiles + callTileCount);
     }
 
     uint32_t FramebufferRenderer::getDestinationIndex() {
@@ -313,12 +318,84 @@ namespace RT64 {
         return dstIndex;
     }
     
+    void FramebufferRenderer::updateLocalTextureSets(RenderWorker *worker) {
+        if (!localUnusedColor) {
+            localUnusedColor = worker->device->createTexture(RenderTextureDesc::Texture2D(1, 1, 1, RenderFormat::R8G8B8A8_UNORM));
+            localUnusedTMEM = worker->device->createTexture(RenderTextureDesc::Texture1D(4096, 1, RenderFormat::R8_UINT));
+        }
+        if (!localUnusedTransitioned) {
+            localZeroUpload = worker->device->createBuffer(RenderBufferDesc::UploadBuffer(4096));
+            const RenderRange noReads(0, 0), allWrites(0, 4096);
+            void *zero = localZeroUpload->map(0, &noReads);
+            if (!zero) throw std::runtime_error("Could not initialize local texture descriptors");
+            std::memset(zero, 0, 4096);
+            localZeroUpload->unmap(0, &allWrites);
+            worker->commandList->barriers(RenderBarrierStage::COPY, {
+                RenderTextureBarrier(localUnusedColor.get(), RenderTextureLayout::COPY_DEST),
+                RenderTextureBarrier(localUnusedTMEM.get(), RenderTextureLayout::COPY_DEST) });
+            worker->commandList->copyTextureRegion(RenderTextureCopyLocation::Subresource(localUnusedColor.get()),
+                RenderTextureCopyLocation::PlacedFootprint(localZeroUpload.get(), RenderFormat::R8G8B8A8_UNORM, 1, 1, 1, 256));
+            worker->commandList->copyTextureRegion(RenderTextureCopyLocation::Subresource(localUnusedTMEM.get()),
+                RenderTextureCopyLocation::PlacedFootprint(localZeroUpload.get(), RenderFormat::R8_UINT, 4096, 1, 1, 4096));
+            worker->commandList->barriers(RenderBarrierStage::GRAPHICS, {
+                RenderTextureBarrier(localUnusedColor.get(), RenderTextureLayout::SHADER_READ),
+                RenderTextureBarrier(localUnusedTMEM.get(), RenderTextureLayout::SHADER_READ) });
+            localUnusedTransitioned = true;
+        }
+        // WorkloadQueue waits for the previous submission before updating these sets.
+        // No descriptor is overwritten between draw calls in a submission.
+        if (localTextureSets.size() < renderIndicesVector.size()) localTextureSets.resize(renderIndicesVector.size());
+        for (size_t draw = 0; draw < renderIndicesVector.size(); ++draw) {
+            const auto &indices = renderIndicesVector[draw];
+            if (indices.rdpTileCount > 8) throw std::runtime_error("Local texture path requires at most eight RDP tiles");
+            auto &sets = localTextureSets[draw];
+            if (!sets.color) {
+                sets.color = std::make_unique<FramebufferRendererDescriptorTextureSet>(worker->device, 8, true);
+                sets.tmem = std::make_unique<FramebufferRendererDescriptorTextureSet>(worker->device, 8, true);
+            }
+            for (uint32_t slot = 0; slot < 8; ++slot) {
+                const RenderTexture *color = localUnusedColor.get(), *tmem = localUnusedTMEM.get();
+                const RenderTextureView *view = nullptr;
+                if (slot < indices.rdpTileCount) {
+                    const auto &tile = localGPUTiles.at(indices.rdpTileIndex + slot);
+                    bool found = false;
+                    // Framebuffer/tile copies can reuse a free cache index.
+                    for (const auto &dynamic : dynamicTextureViewVector) {
+                        if (dynamic.dstIndex == tile.textureIndex) {
+                            color = dynamic.texture; view = dynamic.textureView; found = true; break;
+                        }
+                    }
+                    if (!found && tile.textureIndex < textureCacheTextures.size()) {
+                        const Texture *entry = textureCacheTextures[tile.textureIndex];
+                        if (textureCacheReplacementMapEnabled && textureCacheTextureReplacements[tile.textureIndex])
+                            entry = textureCacheTextureReplacements[tile.textureIndex];
+                        if (entry) {
+                            if (tile.flags.rawTMEM && entry->tmem) tmem = entry->tmem.get();
+                            else if (entry->texture) color = entry->texture.get();
+                        }
+                    }
+                }
+                const bool realColor = color != localUnusedColor.get();
+                const bool realTMEM = tmem != localUnusedTMEM.get();
+                // Always refresh live resources: pointers may be recycled by the
+                // allocator. Only skip unchanged, permanently owned dummy slots.
+                if (!sets.initialized || realColor || sets.realColor[slot])
+                    sets.color->setTexture(slot, color, RenderTextureLayout::SHADER_READ, view);
+                if (!sets.initialized || realTMEM || sets.realTMEM[slot])
+                    sets.tmem->setTexture(slot, tmem, RenderTextureLayout::SHADER_READ);
+                sets.realColor[slot] = realColor;
+                sets.realTMEM[slot] = realTMEM;
+            }
+            sets.initialized = true;
+        }
+    }
+
     void FramebufferRenderer::updateShaderDescriptorSet(RenderWorker *worker, const DrawBuffers *drawBuffers, const OutputBuffers *outputBuffers, const bool raytracingEnabled) {
         assert(worker != nullptr);
         assert(drawBuffers != nullptr);
         
         const bool createSet = (descTextureSet == nullptr) || (descTextureSet->textureCacheSize < (textureCacheSize + 1));
-        if (createSet) {
+        if (createSet && !localTextures) {
             descTextureSet = std::make_unique<FramebufferRendererDescriptorTextureSet>(worker->device, ((textureCacheSize + 1) * 3) / 2);
         }
 
@@ -384,6 +461,11 @@ namespace RT64 {
         descCommonSet->setBuffer(descCommonSet->RDPTiles, drawBuffers->rdpTilesBuffer.get(), RenderBufferStructuredView(sizeof(interop::RDPTile)));
         descCommonSet->setBuffer(descCommonSet->GPUTiles, drawBuffers->gpuTilesBuffer.get(), RenderBufferStructuredView(sizeof(interop::GPUTile)));
         descCommonSet->setBuffer(descCommonSet->DynamicRenderParams, drawBuffers->renderParamsBuffer.get(), RenderBufferStructuredView(sizeof(interop::RenderParams)));
+
+        if (localTextures) {
+            updateLocalTextureSets(worker);
+            return;
+        }
 
         // Make sure the versions vector matches the texture cache size.
         descriptorTextureVersions.resize(textureCacheSize, 0);
@@ -488,8 +570,10 @@ namespace RT64 {
             previousScissor = RenderRect();
             worker->commandList->setGraphicsPipelineLayout(rendererPipelineLayout);
             worker->commandList->setGraphicsDescriptorSet(descCommonSet->get(), 0);
-            worker->commandList->setGraphicsDescriptorSet(descTextureSet->get(), 1);
-            worker->commandList->setGraphicsDescriptorSet(descTextureSet->get(), 2);
+            if (!localTextures) {
+                worker->commandList->setGraphicsDescriptorSet(descTextureSet->get(), 1);
+                worker->commandList->setGraphicsDescriptorSet(descTextureSet->get(), 2);
+            }
             worker->commandList->setGraphicsDescriptorSet(depthState ? descRealFbSet : descDummyFbSet, 3);
             worker->commandList->setViewports(framebuffer.viewport);
         };
@@ -595,6 +679,10 @@ namespace RT64 {
                     previousPipeline = triangles.pipeline;
                 }
                 
+                if (localTextures) {
+                    worker->commandList->setGraphicsDescriptorSet(localTextureSets[i].color->get(), 1);
+                    worker->commandList->setGraphicsDescriptorSet(localTextureSets[i].tmem->get(), 2);
+                }
                 rasterParams.renderIndex = i;
                 rasterParams.screenScale = triangles.screenScale;
                 rasterParams.screenOffset = triangles.screenOffset;
@@ -1171,8 +1259,10 @@ namespace RT64 {
             worker->commandList->setPipeline(debugShader.pipeline.get());
             worker->commandList->setGraphicsPipelineLayout(debugShader.pipelineLayout.get());
             worker->commandList->setGraphicsDescriptorSet(descCommonSet->get(), 0);
-            worker->commandList->setGraphicsDescriptorSet(descTextureSet->get(), 1);
-            worker->commandList->setGraphicsDescriptorSet(descTextureSet->get(), 2);
+            if (!localTextures) {
+                worker->commandList->setGraphicsDescriptorSet(descTextureSet->get(), 1);
+                worker->commandList->setGraphicsDescriptorSet(descTextureSet->get(), 2);
+            }
             worker->commandList->setGraphicsDescriptorSet(descRealFbSet, 3);
             worker->commandList->drawInstanced(3, 1, 0, 0);
         }

@@ -3,6 +3,20 @@
 //
 
 #include "rt64_raster_shader.h"
+#if defined(__ANDROID__)
+#include "shaders/RasterPSLocalDynamic.hlsl.spirv.h"
+#include "shaders/RasterPSLocalDynamicMS.hlsl.spirv.h"
+#include "shaders/RasterPSLocalSpec.hlsl.spirv.h"
+#include "shaders/RasterPSLocalSpecMS.hlsl.spirv.h"
+#include "shaders/RasterPSLocalSpecFlat.hlsl.spirv.h"
+#include "shaders/RasterPSLocalSpecFlatMS.hlsl.spirv.h"
+#include "shaders/RasterPSLocalMRTDynamic.hlsl.spirv.h"
+#include "shaders/RasterPSLocalMRTDynamicMS.hlsl.spirv.h"
+#include "shaders/RasterPSLocalMRTSpec.hlsl.spirv.h"
+#include "shaders/RasterPSLocalMRTSpecMS.hlsl.spirv.h"
+#include "shaders/RasterPSLocalMRTSpecFlat.hlsl.spirv.h"
+#include "shaders/RasterPSLocalMRTSpecFlatMS.hlsl.spirv.h"
+#endif
 #include "shaders/RasterPSDynamicMRT.hlsl.spirv.h"
 #include "shaders/RasterPSDynamicMRTMS.hlsl.spirv.h"
 #include "shaders/RasterPSSpecMRT.hlsl.spirv.h"
@@ -101,9 +115,26 @@ namespace RT64 {
 
     // OptimizerCacheSPIRV
 
-    void OptimizerCacheSPIRV::initialize(bool textureFallback, bool separateCoverage) {
+    void OptimizerCacheSPIRV::initialize(bool textureFallback, bool separateCoverage, bool localTextures) {
         rasterVS.parse(RasterVSSpecConstantBlobSPIRV, std::size(RasterVSSpecConstantBlobSPIRV));
         rasterVSFlat.parse(RasterVSSpecConstantFlatBlobSPIRV, std::size(RasterVSSpecConstantFlatBlobSPIRV));
+#if defined(__ANDROID__)
+        if (localTextures) {
+            if (separateCoverage) {
+                rasterPS.parse(RasterPSLocalMRTSpecBlobSPIRV, std::size(RasterPSLocalMRTSpecBlobSPIRV));
+                rasterPSMS.parse(RasterPSLocalMRTSpecMSBlobSPIRV, std::size(RasterPSLocalMRTSpecMSBlobSPIRV));
+                rasterPSFlat.parse(RasterPSLocalMRTSpecFlatBlobSPIRV, std::size(RasterPSLocalMRTSpecFlatBlobSPIRV));
+                rasterPSFlatMS.parse(RasterPSLocalMRTSpecFlatMSBlobSPIRV, std::size(RasterPSLocalMRTSpecFlatMSBlobSPIRV));
+            }
+            else {
+                rasterPS.parse(RasterPSLocalSpecBlobSPIRV, std::size(RasterPSLocalSpecBlobSPIRV));
+                rasterPSMS.parse(RasterPSLocalSpecMSBlobSPIRV, std::size(RasterPSLocalSpecMSBlobSPIRV));
+                rasterPSFlat.parse(RasterPSLocalSpecFlatBlobSPIRV, std::size(RasterPSLocalSpecFlatBlobSPIRV));
+                rasterPSFlatMS.parse(RasterPSLocalSpecFlatMSBlobSPIRV, std::size(RasterPSLocalSpecFlatMSBlobSPIRV));
+            }
+            return;
+        }
+#endif
         if (separateCoverage) {
 #if defined(__ANDROID__)
             if (textureFallback) {
@@ -231,7 +262,16 @@ namespace RT64 {
                 PSBlobSize = uint32_t(useMSAA ? std::size(RasterPSSpecConstantFlatMSBlobMSL) : std::size(RasterPSSpecConstantFlatBlobMSL));
             }
 
-            vertexShader = device->createShader(VSBlob, VSBlobSize, "VSMain", shaderFormat);
+    #if defined(__ANDROID__)
+        if (device->getCapabilities().localTextureDescriptors) {
+            const bool mrt = !device->getCapabilities().dualSourceBlend;
+            PSBlob = mrt ? (useMSAA ? RasterPSLocalMRTDynamicMSBlobSPIRV : RasterPSLocalMRTDynamicBlobSPIRV)
+                         : (useMSAA ? RasterPSLocalDynamicMSBlobSPIRV : RasterPSLocalDynamicBlobSPIRV);
+            PSBlobSize = uint32_t(mrt ? (useMSAA ? std::size(RasterPSLocalMRTDynamicMSBlobSPIRV) : std::size(RasterPSLocalMRTDynamicBlobSPIRV))
+                         : (useMSAA ? std::size(RasterPSLocalDynamicMSBlobSPIRV) : std::size(RasterPSLocalDynamicBlobSPIRV)));
+        }
+#endif
+        vertexShader = device->createShader(VSBlob, VSBlobSize, "VSMain", shaderFormat);
             pixelShader = device->createShader(PSBlob, PSBlobSize, "PSMain", shaderFormat);
 
             // Spec constants should replace the constants embedded in the shader directly.
@@ -533,11 +573,20 @@ namespace RT64 {
             PSBlobSize = uint32_t(useMSAA ? std::size(RasterPSDynamicMRTMSBlobSPIRV) : std::size(RasterPSDynamicMRTBlobSPIRV));
         }
 
+#if defined(__ANDROID__)
+        if (device->getCapabilities().localTextureDescriptors) {
+            const bool mrt = !device->getCapabilities().dualSourceBlend;
+            PSBlob = mrt ? (useMSAA ? RasterPSLocalMRTDynamicMSBlobSPIRV : RasterPSLocalMRTDynamicBlobSPIRV)
+                         : (useMSAA ? RasterPSLocalDynamicMSBlobSPIRV : RasterPSLocalDynamicBlobSPIRV);
+            PSBlobSize = uint32_t(mrt ? (useMSAA ? std::size(RasterPSLocalMRTDynamicMSBlobSPIRV) : std::size(RasterPSLocalMRTDynamicBlobSPIRV))
+                         : (useMSAA ? std::size(RasterPSLocalDynamicMSBlobSPIRV) : std::size(RasterPSLocalDynamicBlobSPIRV)));
+        }
+#endif
         vertexShader = device->createShader(VSBlob, VSBlobSize, "VSMain", shaderFormat);
         pixelShader = device->createShader(PSBlob, PSBlobSize, "PSMain", shaderFormat);
 
-        FramebufferRendererDescriptorCommonSet descriptorCommonSet(shaderLibrary->samplerLibrary, device->getCapabilities().raytracing);
-        FramebufferRendererDescriptorTextureSet descriptorTextureSet;
+        FramebufferRendererDescriptorCommonSet descriptorCommonSet(shaderLibrary->samplerLibrary, device->getCapabilities().raytracing, nullptr, device->getCapabilities().localTextureDescriptors);
+        FramebufferRendererDescriptorTextureSet descriptorTextureSet(nullptr, 0, device->getCapabilities().localTextureDescriptors);
         FramebufferRendererDescriptorFramebufferSet descriptorFramebufferSet;
         RenderPipelineLayoutBuilder layoutBuilder;
         layoutBuilder.begin(false, true);
@@ -699,7 +748,7 @@ namespace RT64 {
                 fatalFailure |= (status == Status::FatalFailure);
             }
 #if defined(__ANDROID__)
-            if (retryableFailure && !fatalFailure && (shaderFormat == RenderShaderFormat::SPIRV)) {
+            if (retryableFailure && !fatalFailure && (shaderFormat == RenderShaderFormat::SPIRV) && !pipelineThreadCreations.front().front().device->getCapabilities().localTextureDescriptors) {
                 // All compilation workers are joined and no frame can use these
                 // pipelines yet. Replace the whole family so depth/coverage
                 // variants use consistent filtering. Exactly one retry per set.

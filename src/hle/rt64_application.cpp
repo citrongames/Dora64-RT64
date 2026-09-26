@@ -379,6 +379,9 @@ namespace RT64 {
         if (!rasterShaderCache->shaderUber->waitForPipelineCreation()) {
             return SetupResult::GraphicsPipelineCreationFailed;
         }
+        // Android can kill the process without running teardown. Persist the
+        // expensive startup pipelines before handing control back to the game.
+        device->savePipelineCache();
 #endif
 
 
