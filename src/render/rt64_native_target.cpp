@@ -231,7 +231,8 @@ namespace RT64 {
             RenderRange readRange(0, sizeof(uint32_t));
             uint32_t *readbackData = reinterpret_cast<uint32_t *>(changeReadbackBuffer->map(0, &readRange));
             modifiedCount = *readbackData;
-            changeReadbackBuffer->unmap();
+            const RenderRange noWrites(0, 0);
+            changeReadbackBuffer->unmap(0, &noWrites);
         }
         // Consider all pixels as modified.
         else {
@@ -376,7 +377,8 @@ namespace RT64 {
         RenderRange readRange = { bufferOffset, bufferOffset + bufferSize };
         uint8_t *readbackData = reinterpret_cast<uint8_t *>(writeBuffer.nativeReadbackBuffer->map(0, &readRange));
         memcpy(data, readbackData + bufferOffset, bufferSize);
-        writeBuffer.nativeReadbackBuffer->unmap();
+        const RenderRange noWrites(0, 0);
+        writeBuffer.nativeReadbackBuffer->unmap(0, &noWrites);
         writeBufferHistoryIndex++;
     }
 };

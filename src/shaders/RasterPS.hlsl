@@ -319,8 +319,13 @@ void PSMain(
 #if defined(DYNAMIC_RENDER_PARAMS)
     , bool isFrontFace : SV_IsFrontFace
 #endif
+#if defined(RT64_SEPARATE_COVERAGE)
+    , [[vk::location(0)]] out float4 pixelColor : SV_TARGET0
+    , [[vk::location(1)]] out float4 pixelCoverage : SV_TARGET1
+#else
     , [[vk::location(0)]] [[vk::index(0)]] out float4 pixelColor : SV_TARGET0
     , [[vk::location(0)]] [[vk::index(1)]] out float4 pixelAlpha : SV_TARGET1
+#endif
 )
 {
 #if !defined(DYNAMIC_RENDER_PARAMS)
@@ -336,7 +341,14 @@ void PSMain(
         discard;
     }
 
+#if defined(RT64_SEPARATE_COVERAGE)
+    // Opacity drives attachment 0 RGB blending; coverage accumulates in
+    // attachment 1 alpha with the exact same precision and rules as before.
+    pixelColor = float4(resultColor.rgb, resultAlpha.a);
+    pixelCoverage = resultColor;
+#else
     pixelColor = resultColor;
     pixelAlpha = resultAlpha;
+#endif
 }
 #endif

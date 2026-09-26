@@ -3,6 +3,40 @@
 //
 
 #include "rt64_raster_shader.h"
+#include "shaders/RasterPSDynamicMRT.hlsl.spirv.h"
+#include "shaders/RasterPSDynamicMRTMS.hlsl.spirv.h"
+#include "shaders/RasterPSSpecMRT.hlsl.spirv.h"
+#include "shaders/RasterPSSpecMRTMS.hlsl.spirv.h"
+#include "shaders/RasterPSSpecMRTFlat.hlsl.spirv.h"
+#include "shaders/RasterPSSpecMRTFlatMS.hlsl.spirv.h"
+#if defined(__ANDROID__)
+#include "shaders/RasterPSDynamicMRTFallback.hlsl.spirv.h"
+#endif
+#if defined(__ANDROID__)
+#include "shaders/RasterPSDynamicMRTFallbackMS.hlsl.spirv.h"
+#endif
+#if defined(__ANDROID__)
+#include "shaders/RasterPSSpecMRTFallback.hlsl.spirv.h"
+#endif
+#if defined(__ANDROID__)
+#include "shaders/RasterPSSpecMRTFallbackMS.hlsl.spirv.h"
+#endif
+#if defined(__ANDROID__)
+#include "shaders/RasterPSSpecMRTFallbackFlat.hlsl.spirv.h"
+#endif
+#if defined(__ANDROID__)
+#include "shaders/RasterPSSpecMRTFallbackFlatMS.hlsl.spirv.h"
+#endif
+
+#if defined(__ANDROID__)
+#include <android/log.h>
+#include "shaders/RasterPSDynamicFallback.hlsl.spirv.h"
+#include "shaders/RasterPSDynamicFallbackMS.hlsl.spirv.h"
+#include "shaders/RasterPSSpecFallback.hlsl.spirv.h"
+#include "shaders/RasterPSSpecFallbackMS.hlsl.spirv.h"
+#include "shaders/RasterPSSpecFallbackFlat.hlsl.spirv.h"
+#include "shaders/RasterPSSpecFallbackFlatMS.hlsl.spirv.h"
+#endif
 
 #include "xxHash/xxh3.h"
 
@@ -67,13 +101,42 @@ namespace RT64 {
 
     // OptimizerCacheSPIRV
 
-    void OptimizerCacheSPIRV::initialize() {
+    void OptimizerCacheSPIRV::initialize(bool textureFallback, bool separateCoverage) {
         rasterVS.parse(RasterVSSpecConstantBlobSPIRV, std::size(RasterVSSpecConstantBlobSPIRV));
         rasterVSFlat.parse(RasterVSSpecConstantFlatBlobSPIRV, std::size(RasterVSSpecConstantFlatBlobSPIRV));
-        rasterPS.parse(RasterPSSpecConstantBlobSPIRV, std::size(RasterPSSpecConstantBlobSPIRV));
-        rasterPSMS.parse(RasterPSSpecConstantMSBlobSPIRV, std::size(RasterPSSpecConstantMSBlobSPIRV));
-        rasterPSFlat.parse(RasterPSSpecConstantFlatBlobSPIRV, std::size(RasterPSSpecConstantFlatBlobSPIRV));
-        rasterPSFlatMS.parse(RasterPSSpecConstantFlatMSBlobSPIRV, std::size(RasterPSSpecConstantFlatMSBlobSPIRV));
+        if (separateCoverage) {
+#if defined(__ANDROID__)
+            if (textureFallback) {
+                rasterPS.parse(RasterPSSpecMRTFallbackBlobSPIRV, std::size(RasterPSSpecMRTFallbackBlobSPIRV));
+                rasterPSMS.parse(RasterPSSpecMRTFallbackMSBlobSPIRV, std::size(RasterPSSpecMRTFallbackMSBlobSPIRV));
+                rasterPSFlat.parse(RasterPSSpecMRTFallbackFlatBlobSPIRV, std::size(RasterPSSpecMRTFallbackFlatBlobSPIRV));
+                rasterPSFlatMS.parse(RasterPSSpecMRTFallbackFlatMSBlobSPIRV, std::size(RasterPSSpecMRTFallbackFlatMSBlobSPIRV));
+            }
+            else
+#endif
+            {
+                rasterPS.parse(RasterPSSpecMRTBlobSPIRV, std::size(RasterPSSpecMRTBlobSPIRV));
+                rasterPSMS.parse(RasterPSSpecMRTMSBlobSPIRV, std::size(RasterPSSpecMRTMSBlobSPIRV));
+                rasterPSFlat.parse(RasterPSSpecMRTFlatBlobSPIRV, std::size(RasterPSSpecMRTFlatBlobSPIRV));
+                rasterPSFlatMS.parse(RasterPSSpecMRTFlatMSBlobSPIRV, std::size(RasterPSSpecMRTFlatMSBlobSPIRV));
+            }
+        }
+        else
+#if defined(__ANDROID__)
+        if (textureFallback) {
+            rasterPS.parse(RasterPSSpecFallbackBlobSPIRV, std::size(RasterPSSpecFallbackBlobSPIRV));
+            rasterPSMS.parse(RasterPSSpecFallbackMSBlobSPIRV, std::size(RasterPSSpecFallbackMSBlobSPIRV));
+            rasterPSFlat.parse(RasterPSSpecFallbackFlatBlobSPIRV, std::size(RasterPSSpecFallbackFlatBlobSPIRV));
+            rasterPSFlatMS.parse(RasterPSSpecFallbackFlatMSBlobSPIRV, std::size(RasterPSSpecFallbackFlatMSBlobSPIRV));
+        }
+        else
+#endif
+        {
+            rasterPS.parse(RasterPSSpecConstantBlobSPIRV, std::size(RasterPSSpecConstantBlobSPIRV));
+            rasterPSMS.parse(RasterPSSpecConstantMSBlobSPIRV, std::size(RasterPSSpecConstantMSBlobSPIRV));
+            rasterPSFlat.parse(RasterPSSpecConstantFlatBlobSPIRV, std::size(RasterPSSpecConstantFlatBlobSPIRV));
+            rasterPSFlatMS.parse(RasterPSSpecConstantFlatMSBlobSPIRV, std::size(RasterPSSpecConstantFlatMSBlobSPIRV));
+        }
         assert(!rasterVS.empty());
         assert(!rasterVSFlat.empty());
         assert(!rasterPS.empty());
@@ -132,7 +195,12 @@ namespace RT64 {
             
             bool vsRun = respv::Optimizer::run(*VS, specConstants.data(), uint32_t(specConstants.size()), optimizedVS);
             bool psRun = respv::Optimizer::run(*PS, specConstants.data(), uint32_t(specConstants.size()), optimizedPS);
-            assert(vsRun && psRun && "Shader optimization must always succeed as the inputs are always the same.");
+            if (!vsRun || !psRun) {
+                // A failed optimization must retain the working ubershader,
+                // never pass empty shader bytes to the driver in release builds.
+                fprintf(stderr, "Raster shader optimization failed; retaining ubershader.\n");
+                return;
+            }
 
             vertexShader = device->createShader(optimizedVS.data(), optimizedVS.size(), "VSMain", shaderFormat);
             pixelShader = device->createShader(optimizedPS.data(), optimizedPS.size(), "PSMain", shaderFormat);
@@ -344,6 +412,23 @@ namespace RT64 {
             targetBlend.dstBlendAlpha = RenderBlend::ONE;
         }
 
+        if (!c.device->getCapabilities().dualSourceBlend) {
+            pipelineDesc.renderTargetCount = 2;
+            pipelineDesc.renderTargetFormat[1] = pipelineDesc.renderTargetFormat[0];
+            // Keep coverage copy/add independent of RGB opacity blending.
+            pipelineDesc.renderTargetBlend[1] = RenderBlendDesc::Copy();
+            auto &coverageBlend = pipelineDesc.renderTargetBlend[1];
+            coverageBlend.renderTargetWriteMask = uint8_t(RenderColorWriteEnable::ALPHA);
+            coverageBlend.blendEnabled = c.cvgAdd;
+            coverageBlend.dstBlendAlpha = c.cvgAdd ? RenderBlend::ONE : RenderBlend::ZERO;
+            targetBlend = RenderBlendDesc::Copy();
+            targetBlend.renderTargetWriteMask = uint8_t(RenderColorWriteEnable::RED) |
+                uint8_t(RenderColorWriteEnable::GREEN) | uint8_t(RenderColorWriteEnable::BLUE);
+            targetBlend.blendEnabled = c.alphaBlend;
+            targetBlend.srcBlend = c.alphaBlend ? RenderBlend::SRC_ALPHA : RenderBlend::ONE;
+            targetBlend.dstBlend = c.alphaBlend ? RenderBlend::INV_SRC_ALPHA : RenderBlend::ZERO;
+        }
+
         return c.device->createGraphicsPipeline(pipelineDesc);
     }
     
@@ -407,6 +492,8 @@ namespace RT64 {
     RasterShaderUber::RasterShaderUber(RenderDevice *device, RenderShaderFormat shaderFormat, const RenderMultisampling &multisampling, const ShaderLibrary *shaderLibrary, uint32_t threadCount) {
         assert(device != nullptr);
 
+        this->shaderFormat = shaderFormat;
+
         // Create the shaders.
         const void *VSBlob = nullptr;
         const void *PSBlob = nullptr;
@@ -439,6 +526,11 @@ namespace RT64 {
         default:
             assert(false && "Unknown shader format.");
             return;
+        }
+
+        if (!device->getCapabilities().dualSourceBlend && shaderFormat == RenderShaderFormat::SPIRV) {
+            PSBlob = useMSAA ? RasterPSDynamicMRTMSBlobSPIRV : RasterPSDynamicMRTBlobSPIRV;
+            PSBlobSize = uint32_t(useMSAA ? std::size(RasterPSDynamicMRTMSBlobSPIRV) : std::size(RasterPSDynamicMRTBlobSPIRV));
         }
 
         vertexShader = device->createShader(VSBlob, VSBlobSize, "VSMain", shaderFormat);
@@ -523,6 +615,12 @@ namespace RT64 {
         postBlendDesc.renderTargetBlend[0] = RenderBlendDesc::Copy();
         postBlendDesc.renderTargetFormat[0] = RenderTarget::colorBufferFormat(shaderLibrary->usesHDR);
         postBlendDesc.renderTargetCount = 1;
+        if (!device->getCapabilities().dualSourceBlend) {
+            postBlendDesc.renderTargetCount = 2;
+            postBlendDesc.renderTargetFormat[1] = postBlendDesc.renderTargetFormat[0];
+            postBlendDesc.renderTargetBlend[1] = RenderBlendDesc::Copy();
+            postBlendDesc.renderTargetBlend[1].renderTargetWriteMask = 0;
+        }
         postBlendDesc.cullMode = RenderCullMode::NONE;
         postBlendDesc.depthTargetFormat = RenderFormat::D32_FLOAT;
         postBlendDesc.multisampling = multisampling;
@@ -565,7 +663,7 @@ namespace RT64 {
         if (threadIndex > 0) {
             std::unique_lock<std::mutex> lock(firstPipelineMutex);
             firstPipelineCondition.wait(lock, [this]() {
-                return (pipelines[0] != nullptr);
+                return firstPipelineReady;
             });
         }
 
@@ -575,6 +673,7 @@ namespace RT64 {
             if (pipelineIndex == 0) {
                 firstPipelineMutex.lock();
                 pipelines[pipelineIndex] = RasterShader::createPipeline(creation);
+                firstPipelineReady = true;
                 firstPipelineMutex.unlock();
                 firstPipelineCondition.notify_all();
             }
@@ -584,18 +683,76 @@ namespace RT64 {
         }
     }
 
-    void RasterShaderUber::waitForPipelineCreation() {
+    bool RasterShaderUber::waitForPipelineCreation() {
         if (!pipelinesCreated) {
             for (std::unique_ptr<std::thread> &thread : pipelineThreads) {
                 thread->join();
             }
-
             pipelineThreads.clear();
+
+            using Status = RenderPipeline::CreationStatus;
+            bool retryableFailure = false;
+            bool fatalFailure = false;
+            for (const auto &pipeline : pipelines) {
+                const Status status = pipeline ? pipeline->getCreationStatus() : Status::FatalFailure;
+                retryableFailure |= (status == Status::RetryableFailure);
+                fatalFailure |= (status == Status::FatalFailure);
+            }
+#if defined(__ANDROID__)
+            if (retryableFailure && !fatalFailure && (shaderFormat == RenderShaderFormat::SPIRV)) {
+                // All compilation workers are joined and no frame can use these
+                // pipelines yet. Replace the whole family so depth/coverage
+                // variants use consistent filtering. Exactly one retry per set.
+                auto creation = pipelineThreadCreations.front().front();
+                const bool msaa = creation.multisampling.sampleCount > 1;
+                const void *blob = msaa ? RasterPSDynamicFallbackMSBlobSPIRV : RasterPSDynamicFallbackBlobSPIRV;
+                uint32_t size = uint32_t(msaa ? std::size(RasterPSDynamicFallbackMSBlobSPIRV) : std::size(RasterPSDynamicFallbackBlobSPIRV));
+                if (!creation.device->getCapabilities().dualSourceBlend) {
+                    blob = msaa ? RasterPSDynamicMRTFallbackMSBlobSPIRV : RasterPSDynamicMRTFallbackBlobSPIRV;
+                    size = uint32_t(msaa ? std::size(RasterPSDynamicMRTFallbackMSBlobSPIRV) : std::size(RasterPSDynamicMRTFallbackBlobSPIRV));
+                }
+                __android_log_print(ANDROID_LOG_WARN, "Dora64Vulkan", "Raster shader rejected; retrying with explicit-LOD anisotropic fallback (samples=%u)", creation.multisampling.sampleCount);
+                for (auto &pipeline : pipelines) {
+                    pipeline.reset();
+                }
+                pixelShader = creation.device->createShader(blob, size, "PSMain", shaderFormat);
+                bool fallbackValid = (pixelShader != nullptr);
+                if (fallbackValid) {
+                    for (const auto &threadCreations : pipelineThreadCreations) {
+                        for (auto retry : threadCreations) {
+                            retry.pixelShader = pixelShader.get();
+                            const uint32_t index = pipelineStateIndex(retry.zCmp, retry.zUpd, retry.cvgAdd);
+                            pipelines[index] = RasterShader::createPipeline(retry);
+                            if (!pipelines[index] || (pipelines[index]->getCreationStatus() != Status::Success)) {
+                                fallbackValid = false;
+                                break;
+                            }
+                        }
+                        if (!fallbackValid) {
+                            break;
+                        }
+                    }
+                }
+                usesTextureFallback.store(fallbackValid);
+                __android_log_print(fallbackValid ? ANDROID_LOG_INFO : ANDROID_LOG_ERROR, "Dora64Vulkan",
+                    fallbackValid ? "Raster shader fallback ready: mipmaps and software anisotropy enabled" : "Raster shader fallback failed; rendering cannot start");
+            }
+#endif
+            pipelinesValid = true;
+            for (const auto &pipeline : pipelines) {
+                pipelinesValid &= pipeline && (pipeline->getCreationStatus() == Status::Success);
+            }
+            // These are independent of the texture shader and cannot be repaired
+            // by its fallback, but must also be valid before any rendering starts.
+            for (const auto *pipeline : { postBlendDitherNoiseAddPipeline.get(), postBlendDitherNoiseSubPipeline.get(), postBlendDitherNoiseSubNegativePipeline.get() }) {
+                pipelinesValid &= pipeline && (pipeline->getCreationStatus() == Status::Success);
+            }
             pipelineThreadCreations.clear();
             vertexShader.reset();
             pixelShader.reset();
             pipelinesCreated = true;
         }
+        return pipelinesValid;
     }
 
     uint32_t RasterShaderUber::pipelineStateIndex(bool zCmp, bool zUpd, bool cvgAdd) const {

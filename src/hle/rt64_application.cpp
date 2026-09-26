@@ -280,6 +280,16 @@ namespace RT64 {
             deviceDescription = device->getDescription();
         }
 
+        const auto &blendCaps = device->getCapabilities();
+        if (!blendCaps.dualSourceBlend) {
+            if (!blendCaps.independentBlend || blendCaps.maxColorAttachments < 2 ||
+                renderInterface->getCapabilities().shaderFormat != RenderShaderFormat::SPIRV) {
+                fprintf(stderr, "RT64: neither dual-source blending nor independent MRT blending is supported.\n");
+                return SetupResult::GraphicsPipelineCreationFailed;
+            }
+            fprintf(stderr, "RT64: dual-source blending unavailable; using separate N64 coverage attachment.\n");
+        }
+
         // Detect if the application should use HDR framebuffers or not.
         bool usesHDR;
         switch (userConfig.internalColorFormat) {
@@ -351,6 +361,10 @@ namespace RT64 {
         shaderLibrary = std::make_unique<ShaderLibrary>(usesHDR, usesHardwareResolve);
         shaderLibrary->setupCommonShaders(renderInterface.get(), device.get());
         shaderLibrary->setupMultisamplingShaders(renderInterface.get(), device.get(), multisampling);
+        if (!blendCaps.dualSourceBlend && (!shaderLibrary->coverageMerge.pipeline ||
+            shaderLibrary->coverageMerge.pipeline->getCreationStatus() != RenderPipeline::CreationStatus::Success)) {
+            return SetupResult::GraphicsPipelineCreationFailed;
+        }
 
         // Create the shader caches.
         // Estimate the amount of shader compiler threads by trying to use about half of the system's available threads.
@@ -359,6 +373,14 @@ namespace RT64 {
         const uint32_t ubershaderThreads = uint32_t(std::max(int(threadsAvailable) - 2, 1));
         rasterShaderCache = std::make_unique<RasterShaderCache>(rasterShaderThreads, ubershaderThreads);
         rasterShaderCache->setup(device.get(), renderInterface->getCapabilities().shaderFormat, shaderLibrary.get(), multisampling);
+#if defined(__ANDROID__)
+        // Resolve shader compatibility before the first display list or any
+        // specialized shader requests, and report failure through normal setup.
+        if (!rasterShaderCache->shaderUber->waitForPipelineCreation()) {
+            return SetupResult::GraphicsPipelineCreationFailed;
+        }
+#endif
+
 
 #   if RT_ENABLED
         if (device->getCapabilities().raytracing) {

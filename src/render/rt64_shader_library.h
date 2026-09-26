@@ -52,6 +52,7 @@ namespace RT64 {
         ShaderRecord rtCopyColorToDepthMS;
         ShaderRecord rtCopyDepthToColorMS;
         ShaderRecord textureDecode;
+        ShaderRecord coverageMerge;
         ShaderRecord textureCopy;
         ShaderRecord textureResolve;
         ShaderRecord videoInterfaceLinear;

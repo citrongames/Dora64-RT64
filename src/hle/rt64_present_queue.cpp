@@ -5,6 +5,7 @@
 #include "rt64_present_queue.h"
 
 #include "common/rt64_thread.h"
+#include "common/rt64_wait_diagnostic.h"
 #include "rhi/rt64_render_hooks.h"
 
 #include "rt64_workload_queue.h"
@@ -78,8 +79,10 @@ namespace RT64 {
 
     void PresentQueue::waitForPresentId(uint64_t waitId) {
         std::unique_lock<std::mutex> presentLock(presentIdMutex);
-        presentIdCondition.wait(presentLock, [&]() {
+        waitWithDiagnostic(presentIdCondition, presentLock, [&]() {
             return (waitId <= presentId) || !presentThreadRunning;
+        }, [&]() {
+            fprintf(stderr, "present ID wanted=%llu current=%llu\n", (unsigned long long)waitId, (unsigned long long)presentId);
         });
     }
 
@@ -282,8 +285,11 @@ namespace RT64 {
                 // Stall until the interpolated color target is available.
                 const uint32_t targetIndex = usingMSAA ? i : (i - 1);
                 std::unique_lock<std::mutex> interpolatedLock(ext.sharedResources->interpolatedMutex);
-                ext.sharedResources->interpolatedCondition.wait(interpolatedLock, [&]() {
+                waitWithDiagnostic(ext.sharedResources->interpolatedCondition, interpolatedLock, [&]() {
                     return (frameCounters.available > targetIndex) || ((frameCounters.available == targetIndex) && frameCounters.skipped);
+                }, [&]() {
+                    fprintf(stderr, "present target=%u available=%u presented=%u count=%u skipped=%d\n",
+                        targetIndex, frameCounters.available, frameCounters.presented, frameCounters.count, frameCounters.skipped);
                 });
 
                 // Do not present any more frames after this one after reaching the last available frame if the workload was skipped.

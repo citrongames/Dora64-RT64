@@ -38,6 +38,10 @@ namespace RT64 {
     }
 
     void RenderTarget::releaseTextures() {
+        coverageSynchronized = false;
+        coverageDescSet.reset();
+        coverageTextureView.reset();
+        coverageTexture.reset();
         textureView.reset();
         resolvedTextureView.reset();
         texture.reset();
@@ -89,6 +93,14 @@ namespace RT64 {
         texture = worker->device->createTexture(RenderTextureDesc::ColorTarget(width, height, format, multisampling, &clearValue));
         textureView = texture->createTextureView(RenderTextureViewDesc::Texture2D(format));
         texture->setName("Render Target Color #" + std::to_string(addressForName));
+        if (!worker->device->getCapabilities().dualSourceBlend) {
+            // Same format/sample count preserves the original coverage precision.
+            coverageTexture = worker->device->createTexture(RenderTextureDesc::ColorTarget(width, height, format, multisampling, &clearValue));
+            coverageTextureView = coverageTexture->createTextureView(RenderTextureViewDesc::Texture2D(format));
+            coverageTexture->setName("Render Target Coverage #" + std::to_string(addressForName));
+            coverageDescSet = std::make_unique<TextureCopyDescriptorSet>(worker->device);
+            coverageDescSet->setTexture(coverageDescSet->gInput, coverageTexture.get(), RenderTextureLayout::SHADER_READ, coverageTextureView.get());
+        }
         textureRevision++;
 
         if (multisampling.sampleCount > 1) {
@@ -237,6 +249,9 @@ namespace RT64 {
 
             recordRasterResolve(worker, src->textureResolveDescSet.get(), srcRect.left, srcRect.top, srcRect.right - srcRect.left, srcRect.bottom - srcRect.top, shaderLibrary);
         }
+
+        // The primary image was overwritten independently of coverage.
+        coverageSynchronized = false;
 
         // Copy scaling attributes from source.
         resolutionScale = src->resolutionScale;
@@ -464,8 +479,64 @@ namespace RT64 {
         worker->commandList->drawInstanced(3, 1, 0, 0);
     }
 
+    void RenderTarget::beginSeparateCoverage(RenderWorker *worker) {
+        if (!coverageTexture) {
+            return;
+        }
+#if defined(__ANDROID__)
+        // Temporary performance audit; no GPU readback or additional waits.
+        static thread_local uint32_t reused = 0, seeded = 0;
+        if (coverageSynchronized) { ++reused; } else { ++seeded; }
+        if ((reused + seeded) == 240) {
+            fprintf(stderr, "Dora64 coverage cache: reused=%u seeded=%u\n", reused, seeded);
+            reused = seeded = 0;
+        }
+#endif
+        if (coverageSynchronized) {
+            // The last merge copied this alpha into primary. Raster rendering
+            // modifies RGB in primary and alpha in coverage, so no reseed is
+            // needed until an external primary write invalidates the match.
+            coverageSynchronized = false;
+            return;
+        }
+
+        // Seed coverage from primary alpha, including untouched pixels and
+        // prior framebuffer copies/clears. RGB is copied but never consumed.
+        worker->commandList->barriers(RenderBarrierStage::COPY, {
+            RenderTextureBarrier(texture.get(), RenderTextureLayout::COPY_SOURCE),
+            RenderTextureBarrier(coverageTexture.get(), RenderTextureLayout::COPY_DEST)
+        });
+        worker->commandList->copyTexture(coverageTexture.get(), texture.get());
+        worker->commandList->barriers(RenderBarrierStage::GRAPHICS, {
+            RenderTextureBarrier(texture.get(), RenderTextureLayout::COLOR_WRITE),
+            RenderTextureBarrier(coverageTexture.get(), RenderTextureLayout::COLOR_WRITE)
+        });
+    }
+
+    void RenderTarget::endSeparateCoverage(RenderWorker *worker, const ShaderLibrary *shaderLibrary) {
+        if (!coverageTexture) {
+            return;
+        }
+        worker->commandList->barriers(RenderBarrierStage::GRAPHICS,
+            RenderTextureBarrier(coverageTexture.get(), RenderTextureLayout::SHADER_READ));
+        setupColorFramebuffer(worker);
+        worker->commandList->setFramebuffer(textureFramebuffer.get());
+        const auto &merge = shaderLibrary->coverageMerge;
+        worker->commandList->setPipeline(merge.pipeline.get());
+        worker->commandList->setGraphicsPipelineLayout(merge.pipelineLayout.get());
+        worker->commandList->setGraphicsDescriptorSet(coverageDescSet->get(), 0);
+        worker->commandList->setVertexBuffers(0, nullptr, 0, nullptr);
+        worker->commandList->setViewports(RenderViewport(0.0f, 0.0f, float(width), float(height)));
+        worker->commandList->setScissors(RenderRect(0, 0, width, height));
+        worker->commandList->drawInstanced(3, 1, 0, 0);
+        worker->commandList->barriers(RenderBarrierStage::GRAPHICS,
+            RenderTextureBarrier(coverageTexture.get(), RenderTextureLayout::COLOR_WRITE));
+        coverageSynchronized = true;
+    }
+
     void RenderTarget::markForResolve() {
         resolvedTextureDirty = true;
+        coverageSynchronized = false;
     }
 
     bool RenderTarget::usesResolve() const {

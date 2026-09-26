@@ -6,6 +6,7 @@
 
 #include "rt64_shader_common.h"
 
+#include <atomic>
 #include <condition_variable>
 #include <mutex>
 #include <thread>
@@ -36,7 +37,7 @@ namespace RT64 {
         respv::Shader rasterPSFlat;
         respv::Shader rasterPSFlatMS;
 
-        void initialize();
+        void initialize(bool textureFallback = false, bool separateCoverage = false);
     };
 
     struct PipelineCreation {
@@ -84,7 +85,11 @@ namespace RT64 {
         std::unique_ptr<RenderPipeline> postBlendDitherNoiseSubNegativePipeline;
         std::mutex firstPipelineMutex;
         std::condition_variable firstPipelineCondition;
+        bool firstPipelineReady = false;
         bool pipelinesCreated = false;
+        bool pipelinesValid = false;
+        std::atomic<bool> usesTextureFallback{ false };
+        RenderShaderFormat shaderFormat;
         std::unique_ptr<RenderPipelineLayout> pipelineLayout;
         std::vector<std::vector<PipelineCreation>> pipelineThreadCreations;
         std::vector<std::unique_ptr<std::thread>> pipelineThreads;
@@ -94,7 +99,7 @@ namespace RT64 {
         RasterShaderUber(RenderDevice *device, RenderShaderFormat shaderFormat, const RenderMultisampling &multisampling, const ShaderLibrary *shaderLibrary, uint32_t threadCount);
         ~RasterShaderUber();
         void threadCreatePipelines(uint32_t threadIndex);
-        void waitForPipelineCreation();
+        bool waitForPipelineCreation();
         uint32_t pipelineStateIndex(bool zCmp, bool zUpd, bool cvgAdd) const;
         const RenderPipeline *getPipeline(bool zCmp, bool zUpd, bool cvgAdd) const;
     };

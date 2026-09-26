@@ -20,6 +20,10 @@ namespace RT64 {
         static const long MaxDimension;
 
         std::unique_ptr<RenderTexture> texture;
+        // Only allocated on devices without dual-source blending.
+        std::unique_ptr<RenderTexture> coverageTexture;
+        std::unique_ptr<RenderTextureView> coverageTextureView;
+        std::unique_ptr<TextureCopyDescriptorSet> coverageDescSet;
         std::unique_ptr<RenderTexture> resolvedTexture;
         std::unique_ptr<RenderTextureView> textureView;
         std::unique_ptr<RenderTextureView> resolvedTextureView;
@@ -45,6 +49,8 @@ namespace RT64 {
         int32_t misalignX = 0;
         int32_t invMisalignX = 0;
         bool resolvedTextureDirty = false;
+        // Coverage alpha matches primary alpha after the previous merge.
+        bool coverageSynchronized = false;
         bool usesHDR = false;
 
         RenderTarget(uint32_t addressForName, Framebuffer::Type type, const RenderMultisampling &multisampling, bool usesHDR);
@@ -65,6 +71,8 @@ namespace RT64 {
         void downsampleTarget(RenderWorker *worker, const ShaderLibrary *shaderLibrary);
         void resolveTarget(RenderWorker *worker, const ShaderLibrary *shaderLibrary);
         void recordRasterResolve(RenderWorker *worker, const TextureCopyDescriptorSet *srcDescriptorSet, uint32_t x, uint32_t y, uint32_t width, uint32_t height, const ShaderLibrary *shaderLibrary);
+        void beginSeparateCoverage(RenderWorker *worker);
+        void endSeparateCoverage(RenderWorker *worker, const ShaderLibrary *shaderLibrary);
         void markForResolve();
         bool usesResolve() const;
         RenderTexture *getResolvedTexture() const;

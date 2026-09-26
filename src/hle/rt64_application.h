@@ -50,7 +50,8 @@ namespace RT64 {
             DynamicLibrariesNotFound,
             InvalidGraphicsAPI,
             GraphicsAPINotFound,
-            GraphicsDeviceNotFound
+            GraphicsDeviceNotFound,
+            GraphicsPipelineCreationFailed
         };
 
         enum class DeveloperShortcut {

@@ -40,6 +40,8 @@
 #include "shaders/RtCopyDepthToColor4XPS.hlsl.spirv.h"
 #include "shaders/RtCopyDepthToColor8XPS.hlsl.spirv.h"
 #include "shaders/TextureCopyPS.hlsl.spirv.h"
+#include "shaders/CoverageMergePS.hlsl.spirv.h"
+#include "shaders/CoverageMergeMSPS.hlsl.spirv.h"
 #include "shaders/TextureDecodeCS.hlsl.spirv.h"
 #include "shaders/TextureResolveSamples2XPS.hlsl.spirv.h"
 #include "shaders/TextureResolveSamples4XPS.hlsl.spirv.h"
@@ -637,6 +639,29 @@ namespace RT64 {
 
         // Create shaders shared across all pipelines.
         std::unique_ptr<RenderShader> fullScreenVertexShader = device->createShader(CREATE_SHADER_INPUTS(FullScreenVSBlobDXIL, FullScreenVSBlobSPIRV, FullScreenVSBlobMSL, "VSMain", shaderFormat));
+
+        if (!deviceCapabilities.dualSourceBlend) {
+            assert(shaderFormat == RenderShaderFormat::SPIRV);
+            TextureCopyDescriptorSet descriptorSet;
+            layoutBuilder.begin();
+            layoutBuilder.addDescriptorSet(descriptorSet);
+            layoutBuilder.end();
+            coverageMerge.pipelineLayout = layoutBuilder.create(device);
+            const bool msaa = multisampling.sampleCount > 1;
+            const void *blob = msaa ? CoverageMergeMSPSBlobSPIRV : CoverageMergePSBlobSPIRV;
+            const size_t size = msaa ? std::size(CoverageMergeMSPSBlobSPIRV) : std::size(CoverageMergePSBlobSPIRV);
+            auto pixelShader = device->createShader(blob, size, "PSMain", shaderFormat);
+            RenderGraphicsPipelineDesc desc;
+            desc.pipelineLayout = coverageMerge.pipelineLayout.get();
+            desc.renderTargetBlend[0] = RenderBlendDesc::Copy();
+            desc.renderTargetBlend[0].renderTargetWriteMask = uint8_t(RenderColorWriteEnable::ALPHA);
+            desc.renderTargetFormat[0] = RenderTarget::colorBufferFormat(usesHDR);
+            desc.renderTargetCount = 1;
+            desc.vertexShader = fullScreenVertexShader.get();
+            desc.pixelShader = pixelShader.get();
+            desc.multisampling = multisampling;
+            coverageMerge.pipeline = device->createGraphicsPipeline(desc);
+        }
 
         // Select shader blobs based on sample count.
         const void *TextureResolvePSBlob = nullptr;

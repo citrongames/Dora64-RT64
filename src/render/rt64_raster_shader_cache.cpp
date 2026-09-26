@@ -3,6 +3,10 @@
 //
 
 #include "rt64_raster_shader_cache.h"
+#if defined(__ANDROID__)
+#include <android/log.h>
+#include <cstdio>
+#endif
 
 #include "common/rt64_thread.h"
 
@@ -17,7 +21,6 @@ namespace RT64 {
         this->shaderCache = shaderCache;
 
         thread = std::make_unique<std::thread>(&CompilationThread::loop, this);
-        threadRunning = false;
     }
 
     RasterShaderCache::CompilationThread::~CompilationThread() {
@@ -33,8 +36,7 @@ namespace RT64 {
         // The shader compilation thread should have idle priority by default as the application can use the ubershader in the meantime.
         Thread::setCurrentThreadPriority(Thread::Priority::Idle);
 
-        threadRunning = true;
-
+        // Running is initialized before spawning: never overwrite a stop request.
         while (threadRunning) {
             ShaderDescription shaderDesc;
             bool fromPriorityQueue = false;
@@ -62,6 +64,13 @@ namespace RT64 {
                 const RenderMultisampling multisampling = shaderCache->multisampling;
                 std::unique_ptr<RasterShader> newShader = std::make_unique<RasterShader>(shaderCache->device, shaderDesc, uberPipelineLayout, shaderCache->shaderFormat, multisampling, shaderCache->shaderCompiler.get(), &shaderCache->optimizerCacheSPIRV);
 
+#if defined(__ANDROID__)
+                if (newShader->pipeline && (newShader->pipeline->getCreationStatus() == RenderPipeline::CreationStatus::Success)
+                    && !shaderCache->reportedFirstSpecializedShader.exchange(true)) {
+                    __android_log_print(ANDROID_LOG_INFO, "Dora64Vulkan", "Specialized raster shaders ready (texture fallback=%d)", shaderCache->shaderUber->usesTextureFallback.load() ? 1 : 0);
+                    std::fprintf(stderr, "Dora64 specialized raster shaders ready (texture fallback=%d)\n", shaderCache->shaderUber->usesTextureFallback.load() ? 1 : 0);
+                }
+#endif
                 {
                     const std::unique_lock<std::mutex> lock(shaderCache->GPUShadersMutex);
                     shaderCache->GPUShaders[shaderDesc.hash()] = std::move(newShader);
@@ -103,11 +112,17 @@ namespace RT64 {
         this->multisampling = multisampling;
 
         shaderUber = std::make_unique<RasterShaderUber>(device, shaderFormat, multisampling, shaderLibrary, ubershaderThreadCount);
+#if defined(__ANDROID__)
+        // Resolve the retry before choosing optimizer inputs. Workers only
+        // receive material requests after setup has finished.
+        shaderUber->waitForPipelineCreation();
+#endif
+        reportedFirstSpecializedShader.store(false);
         usesHDR = shaderLibrary->usesHDR;
 
         // Initialize the re-spirv optimizer cache.
         if (shaderFormat == RenderShaderFormat::SPIRV) {
-            optimizerCacheSPIRV.initialize();
+            optimizerCacheSPIRV.initialize(shaderUber->usesTextureFallback.load(), !device->getCapabilities().dualSourceBlend);
         }
     }
 
@@ -168,6 +183,12 @@ namespace RT64 {
             return nullptr;
         }
 
+        const auto *pipeline = shaderIt->second->pipeline.get();
+        // Driver failures are cached too, so we keep the valid ubershader
+        // without repeatedly recompiling or binding a failed material pipeline.
+        if (!pipeline || (pipeline->getCreationStatus() != RenderPipeline::CreationStatus::Success)) {
+            return nullptr;
+        }
         return shaderIt->second.get();
     }
 

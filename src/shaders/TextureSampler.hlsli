@@ -214,6 +214,10 @@ float4 sampleTextureLevel(const RDPTile rdpTile, const GPUTile gpuTile, bool fil
     }
 }
 
+#if defined(RT64_SAMPLE_GRAD_FALLBACK)
+#include "TextureSamplerFallback.hlsli"
+#endif
+
 float4 sampleTexture(OtherMode otherMode, RenderFlags renderFlags, float2 inputUV, float2 ddxUV, float2 ddyUV, const RDPTile rdpTile, const GPUTile gpuTile, bool nextPixelBug) {
     const bool texturePerspective = (otherMode.textPersp() == G_TP_PERSP);
     const bool applyCorrection = (!texturePerspective && !renderFlagRect(renderFlags));
@@ -293,6 +297,10 @@ float4 sampleTexture(OtherMode otherMode, RenderFlags renderFlags, float2 inputU
             float2 ddxUVNorm = ddxUV / originalSize;
             float2 ddyUVNorm = ddyUV / originalSize;
             
+#if defined(RT64_SAMPLE_GRAD_FALLBACK)
+            return sampleNativeGradFallback(texture, nativeSampler, nativeUVCoord,
+                ddxUVNorm, ddyUVNorm, gpuTile.textureDimensions.xy);
+#else
             // Choose the native sampler that was determined to be compatible.
             switch (nativeSampler) {
                 case NATIVE_SAMPLER_WRAP_WRAP:
@@ -315,6 +323,7 @@ float4 sampleTexture(OtherMode otherMode, RenderFlags renderFlags, float2 inputU
                 default:
                     return texture.SampleGrad(gLinearClampClampSampler, nativeUVCoord, ddxUVNorm, ddyUVNorm);
             }
+#endif
         }
     }
     else {

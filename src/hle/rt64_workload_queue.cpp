@@ -5,6 +5,7 @@
 #include "rt64_workload_queue.h"
 
 #include "common/rt64_thread.h"
+#include "common/rt64_wait_diagnostic.h"
 
 #include "rt64_present_queue.h"
 
@@ -90,8 +91,10 @@ namespace RT64 {
 
     void WorkloadQueue::waitForWorkloadId(uint64_t waitId) {
         std::unique_lock<std::mutex> workloadLock(workloadIdMutex);
-        workloadIdCondition.wait(workloadLock, [&]() {
+        waitWithDiagnostic(workloadIdCondition, workloadLock, [&]() {
             return (waitId <= workloadId) || !threadsRunning;
+        }, [&]() {
+            fprintf(stderr, "workload ID wanted=%llu current=%llu\n", (unsigned long long)waitId, (unsigned long long)workloadId);
         });
     }
 
@@ -258,8 +261,10 @@ namespace RT64 {
                 // Wait until the other queue has stopped using the interpolated color targets.
                 std::unique_lock<std::mutex> interpolatedLock(ext.sharedResources->interpolatedMutex);
                 InterpolatedFrameCounters &curFrameCounters = ext.sharedResources->interpolatedFrames[ext.sharedResources->interpolatedFramesIndex];
-                ext.sharedResources->interpolatedCondition.wait(interpolatedLock, [&]() {
+                waitWithDiagnostic(ext.sharedResources->interpolatedCondition, interpolatedLock, [&]() {
                     return curFrameCounters.presented >= curFrameCounters.available;
+                }, [&]() {
+                    fprintf(stderr, "resize drain available=%u presented=%u count=%u skipped=%d\n", curFrameCounters.available, curFrameCounters.presented, curFrameCounters.count, curFrameCounters.skipped);
                 });
             }
 
@@ -699,11 +704,27 @@ namespace RT64 {
 
             workerMutex.lock();
             ext.workloadGraphicsWorker->commandList->begin();
+
             ext.workloadGraphicsWorker->commandList->resetQueryPool(queryPool.get(), 0, 2);
             ext.workloadGraphicsWorker->commandList->writeTimestamp(queryPool.get(), 0);
             framebufferRenderer->endFramebuffers(ext.workloadGraphicsWorker, &workload.drawBuffers, &workload.outputBuffers, workloadConfig.raytracingEnabled);
             framebufferRenderer->recordSetup(ext.workloadGraphicsWorker, bufferUploaders, processRSP ? rspProcessor.get() : nullptr, processWorldVertices ? vertexProcessor.get() : nullptr, &workload.outputBuffers, workloadConfig.raytracingEnabled);
             
+            // Newly allocated targets have undefined pixels. Native framebuffer
+            // restoration below covers only the original, centered N64 area;
+            // it cannot initialize the extra widescreen columns. Clear once,
+            // before imports/copies/draws, so untouched letterbox regions cannot
+            // expose recycled GPU memory after a window/aspect resize.
+            for (RenderTarget *renderTarget : resizedTargets) {
+                if (renderTarget->type == Framebuffer::Type::Color) {
+                    renderTarget->clearColorTarget(ext.workloadGraphicsWorker);
+#if defined(__ANDROID__)
+                    fprintf(stderr, "Dora64 initialized resized color target: address=0x%08X size=%ux%u\n",
+                        renderTarget->addressForName, renderTarget->width, renderTarget->height);
+#endif
+                }
+            }
+
             // Record all framebuffer pairs.
             uint32_t framebufferIndex = 0;
             for (uint32_t f = 0; f < fbPairCount; f++) {
@@ -1024,8 +1045,10 @@ namespace RT64 {
                 // if the frame counter has never presented anything yet, as it'll only be a valid value if the previous present event actually did something.
                 else if (generateInterpolatedFrames) {
                     std::unique_lock<std::mutex> interpolatedLock(ext.sharedResources->interpolatedMutex);
-                    ext.sharedResources->interpolatedCondition.wait(interpolatedLock, [&]() {
+                    waitWithDiagnostic(ext.sharedResources->interpolatedCondition, interpolatedLock, [&]() {
                         return (prevFrameCounters.presented == 0) || (prevFrameCounters.presented >= prevFrameCounters.available);
+                    }, [&]() {
+                        fprintf(stderr, "reuse drain available=%u presented=%u count=%u skipped=%d\n", prevFrameCounters.available, prevFrameCounters.presented, prevFrameCounters.count, prevFrameCounters.skipped);
                     });
                 }
 
@@ -1089,8 +1112,10 @@ namespace RT64 {
                                 // Do not drop a future frame just because this wait was needed. The
                                 // elapsed-time and pending-workload checks already handle actual overload.
                                 std::unique_lock<std::mutex> interpolatedLock(ext.sharedResources->interpolatedMutex);
-                                ext.sharedResources->interpolatedCondition.wait(interpolatedLock, [&]() {
+                                waitWithDiagnostic(ext.sharedResources->interpolatedCondition, interpolatedLock, [&]() {
                                     return prevFrameCounters.presented > targetIndex;
+                                }, [&]() {
+                                    fprintf(stderr, "alternate target available=%u presented=%u count=%u skipped=%d target=%u\n", prevFrameCounters.available, prevFrameCounters.presented, prevFrameCounters.count, prevFrameCounters.skipped, targetIndex);
                                 });
                             }
 

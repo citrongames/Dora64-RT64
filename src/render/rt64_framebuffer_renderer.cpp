@@ -529,6 +529,10 @@ namespace RT64 {
         };
 
         if (fbStorage->colorTarget != nullptr) {
+            if (fbStorage->colorTarget->coverageTexture) {
+                fbStorage->colorTarget->beginSeparateCoverage(worker);
+                worker->commandList->setFramebuffer(depthState ? fbStorage->colorWriteDepthRead.get() : fbStorage->colorDepthWrite.get());
+            }
             switchToGraphicsPipeline();
         }
         
@@ -623,6 +627,9 @@ namespace RT64 {
                 uint32_t clearRectCount = rectCoversWholeTarget ? 0 : 1;
                 if (fbStorage->colorTarget != nullptr) {
                     worker->commandList->clearColor(0, clearRect.color, clearRects, clearRectCount);
+                    if (fbStorage->colorTarget->coverageTexture) {
+                        worker->commandList->clearColor(1, clearRect.color, clearRects, clearRectCount);
+                    }
                 }
                 else {
                     worker->commandList->clearDepth(true, clearRect.depth, clearRects, clearRectCount);
@@ -657,9 +664,15 @@ namespace RT64 {
             }
         }
 
-        // Mark targets for resolve.
+        // Publish coverage back to primary alpha before any existing consumers.
         if (fbStorage->colorTarget != nullptr) {
+            // Mark writes first; the merge then establishes matching alpha for
+            // the next raster submission, avoiding a redundant full-image copy.
             fbStorage->colorTarget->markForResolve();
+            if (fbStorage->colorTarget->coverageTexture) {
+                fbStorage->colorTarget->endSeparateCoverage(worker, shaderLibrary);
+                worker->commandList->setFramebuffer(depthState ? fbStorage->colorWriteDepthRead.get() : fbStorage->colorDepthWrite.get());
+            }
         }
 
         if (fbStorage->depthTarget != nullptr) {
@@ -1262,6 +1275,9 @@ namespace RT64 {
         RenderTarget *depthTarget = targetDrawCall.fbStorage->depthTarget;
         if (colorTarget != nullptr) {
             startBarriers.emplace_back(RenderTextureBarrier(colorTarget->texture.get(), RenderTextureLayout::COLOR_WRITE));
+            if (colorTarget->coverageTexture) {
+                startBarriers.emplace_back(RenderTextureBarrier(colorTarget->coverageTexture.get(), RenderTextureLayout::COLOR_WRITE));
+            }
         }
 
         startBarriers.emplace_back(RenderTextureBarrier(depthTarget->texture.get(), RenderTextureLayout::DEPTH_WRITE));
@@ -1291,6 +1307,9 @@ namespace RT64 {
                     worker->commandList->setFramebuffer(fbStorage->colorDepthWrite.get());
                     worker->commandList->clearColor();
                     worker->commandList->clearDepth();
+                    // Direct interleaved-RT clear bypasses RenderTarget's
+                    // clear helper and must invalidate the coverage copy too.
+                    fbStorage->colorTarget->markForResolve();
 
                     submitDepthAccess(worker, fbStorage, false, interleavedDepthState);
                     submitRasterScene(worker, framebuffer, fbStorage, targetDrawCall.rasterScenes[sceneIndex], interleavedDepthState);

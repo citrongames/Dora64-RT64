@@ -20,7 +20,7 @@ namespace RT64 {
         struct CompilationThread {
             RasterShaderCache *shaderCache;
             std::unique_ptr<std::thread> thread;
-            std::atomic<bool> threadRunning;
+            std::atomic<bool> threadRunning{ true };
 
             CompilationThread(RasterShaderCache *shaderCache);
             ~CompilationThread();
@@ -45,6 +45,7 @@ namespace RT64 {
         std::unique_ptr<ShaderCompiler> shaderCompiler;
         RenderMultisampling multisampling;
         bool usesHDR = false;
+        std::atomic<bool> reportedFirstSpecializedShader{ false };
         
         RasterShaderCache(uint32_t threadCount, uint32_t ubershaderThreadCount);
         ~RasterShaderCache();

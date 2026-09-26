@@ -88,8 +88,9 @@ namespace RT64 {
 
         RenderFramebufferDesc framebufferDesc;
         const RenderTexture *colorTargetPtr = (colorTarget != nullptr) ? colorTarget->texture.get() : nullptr;
-        framebufferDesc.colorAttachments = &colorTargetPtr;
-        framebufferDesc.colorAttachmentsCount = (colorTarget != nullptr) ? 1 : 0;
+        const RenderTexture *attachments[] = { colorTargetPtr, colorTarget ? colorTarget->coverageTexture.get() : nullptr };
+        framebufferDesc.colorAttachments = attachments;
+        framebufferDesc.colorAttachmentsCount = colorTarget ? (attachments[1] ? 2 : 1) : 0;
         framebufferDesc.depthAttachment = (depthTarget != nullptr) ? depthTarget->texture.get() : nullptr;
         colorDepthWrite = device->createFramebuffer(framebufferDesc);
 
